@@ -16,11 +16,11 @@ BUY_MODELS = {
 
 # Automatic sell gears chosen by deployment ratio
 SELL_GEARS = [
-    {"name": "Very Light", "min_u": 0.0, "max_u": 0.2, "s": 6.0},
-    {"name": "Light", "min_u": 0.2, "max_u": 0.4, "s": 5.0},
-    {"name": "Medium", "min_u": 0.4, "max_u": 0.6, "s": 4.0},
-    {"name": "Heavy", "min_u": 0.6, "max_u": 0.8, "s": 3.0},
-    {"name": "Very Heavy", "min_u": 0.8, "max_u": 1.01, "s": 2.0},
+    {"name": "Gear1", "gear_num": 1, "min_u": 0.0, "max_u": 0.2, "s": 6.0},
+    {"name": "Gear2", "gear_num": 2, "min_u": 0.2, "max_u": 0.4, "s": 5.0},
+    {"name": "Gear3", "gear_num": 3, "min_u": 0.4, "max_u": 0.6, "s": 4.0},
+    {"name": "Gear4", "gear_num": 4, "min_u": 0.6, "max_u": 0.8, "s": 3.0},
+    {"name": "Gear5", "gear_num": 5, "min_u": 0.8, "max_u": 1.01, "s": 2.0},
 ]
 
 # Manual sell gears selectable by toggle
@@ -113,7 +113,10 @@ def on_show():
 
     sg = data["sell_gear"]
     s = sg["s"]
-    mode_text = f"Sell gear ({data['mode']})"
+    if manual_mode:
+        gear_label = f"Sell (Manual): {sg['name']} (+{s:.0f}%/+{2*s:.0f}%/+{3*s:.0f}%)"
+    else:
+        gear_label = f"Sell (Auto): gear {sg.get('gear_num', '?')} (+{s:.0f}%/+{2*s:.0f}%/+{3*s:.0f}%)"
     deployment_text = f"Deployment percentage: {data['u']*100:.1f}% (current), {data['new_u']*100:.1f}% (if next buy fills)"
     result_lines = [
         f"Name: {name_var.get().strip() or '(none)'}",
@@ -122,7 +125,7 @@ def on_show():
         f"Buy size: {data['buy_units']:.3f} units (from {current_units:.3f} -> {data['new_u']*100:.1f}% of max)",
         f"Projected avg after buy: {data['new_avg']:.2f}",
         deployment_text,
-        f"{mode_text}: {sg['name']} (+{s:.0f}%/+{2*s:.0f}%/+{3*s:.0f}%)",
+        gear_label,
         f"Targets: {data['sell_targets'][0]:.2f} / {data['sell_targets'][1]:.2f} / {data['sell_targets'][2]:.2f}",
     ]
     result_var.set("\n".join(result_lines))
@@ -136,15 +139,18 @@ def on_show():
         buy_units=data["buy_units"],
         gear_drop=data["gear_drop"],
         name=name_var.get().strip(),
+        new_avg=data["new_avg"],
     )
 
 
-def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_units, buy_units, gear_drop, name):
+def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_units, buy_units, gear_drop, name, new_avg):
     fig.clear()
     ax = fig.add_subplot(111)
     x_start, x_end = 0.0, 1.0
+    volume_pct = current_u * 100
     levels = [
-        ("Avg cost", avg_cost, "black", "-", f"U {current_u*100:.1f}%", f"{avg_cost:.2f}", 3.4),
+        ("Avg cost", avg_cost, "black", "-", f"volume/total = {volume_pct:.1f}%", f"{avg_cost:.2f}", 3.6),
+        ("Projected avg", new_avg, "#cccccc", "--", "after buy", f"{new_avg:.2f}", 1.4),
         ("Next buy", next_buy_price, "red", "-", f"buy {buy_units:.3f}u", f"{next_buy_price:.2f}", 2.4),
         ("Sell T1 (50%)", sell_targets[0], "#0a8f08", "-", "50%", f"{sell_targets[0]:.2f}", 3.0),
         ("Sell T2 (25%)", sell_targets[1], "#0066cc", "-.", "25%", f"{sell_targets[1]:.2f}", 2.2),
@@ -175,7 +181,7 @@ def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_units, bu
     # Vertical gap annotations
     gap_x = 0.5
     # gap from avg to next buy
-    buy_gap_pct = -gear_drop
+    buy_gap_pct = -gear_drop * 100
     ax.plot([gap_x, gap_x], [next_buy_price, avg_cost], color="red", linestyle="--", linewidth=1.0)
     ax.text(gap_x + 0.01, (next_buy_price + avg_cost) / 2, f"{buy_gap_pct:.1f}%", va="center", ha="left", fontsize=9, color="red")
     # gaps for sells (each s step)
@@ -191,8 +197,8 @@ def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_units, bu
         ax.plot([gap_x, gap_x], [y0, y1], color=gap_color, linestyle="--", linewidth=1.0)
         ax.text(gap_x + 0.01, (y0 + y1) / 2, f"+{pct:.1f}%", va="center", ha="left", fontsize=9, color=gap_color)
 
-    ymin = min(next_buy_price, avg_cost, *sell_targets)
-    ymax = max(next_buy_price, avg_cost, *sell_targets)
+    ymin = min(next_buy_price, avg_cost, new_avg, *sell_targets)
+    ymax = max(next_buy_price, avg_cost, new_avg, *sell_targets)
     pad = (ymax - ymin) * 0.1 if ymax != ymin else 1
     ax.set_ylim(ymin - pad, ymax + pad)
     ax.set_xlim(x_start, x_end)
@@ -215,6 +221,21 @@ def update_manual_state():
             rb.state(["disabled"])
 
 
+def update_name_from_choice(*_):
+    choice = name_choice_var.get()
+    if choice == "Etc":
+        custom_name_entry.state(["!disabled"])
+        name_var.set(custom_name_var.get().strip())
+    else:
+        custom_name_entry.state(["disabled"])
+        name_var.set(choice)
+
+
+def on_custom_name_change(*_):
+    if name_choice_var.get() == "Etc":
+        name_var.set(custom_name_var.get().strip())
+
+
 root = tk.Tk()
 root.title("AI Seesaw Trading Calculator")
 
@@ -226,6 +247,8 @@ main.columnconfigure(0, weight=0)
 main.columnconfigure(1, weight=1)
 main.rowconfigure(0, weight=1)
 
+name_choice_var = tk.StringVar(value="Samsung")
+custom_name_var = tk.StringVar()
 name_var = tk.StringVar()
 avg_cost_var = tk.StringVar()
 current_units_var = tk.StringVar()
@@ -238,10 +261,17 @@ result_var = tk.StringVar()
 form = ttk.Frame(main)
 form.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
 
-ttk.Label(form, text="Name").grid(row=0, column=0, sticky="e", padx=4, pady=4)
-ttk.Entry(form, textvariable=name_var, width=18).grid(
-    row=0, column=1, sticky="w", padx=4, pady=4
-)
+ttk.Label(form, text="Name").grid(row=0, column=0, sticky="ne", padx=4, pady=4)
+name_frame = ttk.Frame(form)
+name_frame.grid(row=0, column=1, sticky="w", padx=4, pady=4)
+name_options = ["Samsung", "SK hynix", "NVIDIA", "Alphabet", "Etc"]
+for opt in name_options:
+    ttk.Radiobutton(
+        name_frame, text=opt, value=opt, variable=name_choice_var, command=update_name_from_choice
+    ).pack(anchor="w")
+custom_name_entry = ttk.Entry(name_frame, textvariable=custom_name_var, width=18)
+custom_name_entry.pack(anchor="w", pady=(4, 0))
+custom_name_var.trace_add("write", on_custom_name_change)
 
 ttk.Label(form, text="Average Cost").grid(row=1, column=0, sticky="e", padx=4, pady=4)
 ttk.Entry(form, textvariable=avg_cost_var, width=14).grid(
@@ -306,5 +336,6 @@ main.rowconfigure(0, weight=1)
 main.columnconfigure(1, weight=1)
 
 update_manual_state()
+update_name_from_choice()
 
 root.mainloop()
