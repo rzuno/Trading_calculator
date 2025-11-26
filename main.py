@@ -14,7 +14,7 @@ BUY_MODELS = {
     "Cautious (-7%,0.65)": {"gear_drop": 7.0, "r": 0.65},
 }
 
-# Automatic sell gears chosen by deployment U
+# Automatic sell gears chosen by deployment ratio
 SELL_GEARS = [
     {"name": "Very Light", "min_u": 0.0, "max_u": 0.2, "s": 6.0},
     {"name": "Light", "min_u": 0.2, "max_u": 0.4, "s": 5.0},
@@ -45,7 +45,7 @@ def pick_manual_sell_gear(key):
     return MANUAL_SELL_GEARS.get(key, MANUAL_SELL_GEARS["Gear1"])
 
 
-def compute(avg_cost, current_units, max_units, buy_model_name, emergency, manual_mode, manual_key):
+def compute(avg_cost, current_units, max_units, buy_model_name, manual_mode, manual_key):
     model = BUY_MODELS[buy_model_name]
     gear_drop = model["gear_drop"] / 100
     r = model["r"]
@@ -61,9 +61,7 @@ def compute(avg_cost, current_units, max_units, buy_model_name, emergency, manua
     )
     new_u = new_units / max_units if max_units else 0.0
 
-    if emergency:
-        sell_gear = {"name": "Emergency: Gear1 (1/2/3%)", "s": 1.0}
-    elif manual_mode:
+    if manual_mode:
         sell_gear = pick_manual_sell_gear(manual_key)
     else:
         sell_gear = pick_auto_sell_gear(u)
@@ -84,7 +82,8 @@ def compute(avg_cost, current_units, max_units, buy_model_name, emergency, manua
         "new_u": new_u,
         "sell_gear": sell_gear,
         "sell_targets": sell_targets,
-        "mode": "Emergency" if emergency else ("Manual" if manual_mode else "Auto"),
+        "mode": "Manual" if manual_mode else "Auto",
+        "gear_drop": model["gear_drop"],
     }
 
 
@@ -99,7 +98,6 @@ def on_show():
         messagebox.showerror("Input error", "Use positive numbers (units >= 0).")
         return
 
-    emergency = bool(emergency_var.get())
     manual_mode = bool(manual_sell_var.get())
     manual_key = manual_gear_var.get()
     buy_model = buy_model_var.get()
@@ -109,7 +107,6 @@ def on_show():
         current_units,
         max_units,
         buy_model,
-        emergency,
         manual_mode,
         manual_key,
     )
@@ -117,12 +114,14 @@ def on_show():
     sg = data["sell_gear"]
     s = sg["s"]
     mode_text = f"Sell gear ({data['mode']})"
+    deployment_text = f"Deployment percentage: {data['u']*100:.1f}% (current), {data['new_u']*100:.1f}% (if next buy fills)"
     result_lines = [
+        f"Name: {name_var.get().strip() or '(none)'}",
         f"Buy model: {buy_model}",
         f"Next buy trigger: {data['next_buy_price']:.2f}",
         f"Buy size: {data['buy_units']:.3f} units (from {current_units:.3f} -> {data['new_u']*100:.1f}% of max)",
         f"Projected avg after buy: {data['new_avg']:.2f}",
-        f"Deployment U: {data['u']*100:.1f}% (current), {data['new_u']*100:.1f}% (if next buy fills)",
+        deployment_text,
         f"{mode_text}: {sg['name']} (+{s:.0f}%/+{2*s:.0f}%/+{3*s:.0f}%)",
         f"Targets: {data['sell_targets'][0]:.2f} / {data['sell_targets'][1]:.2f} / {data['sell_targets'][2]:.2f}",
     ]
@@ -135,39 +134,70 @@ def on_show():
         current_u=data["u"],
         max_units=max_units,
         buy_units=data["buy_units"],
+        gear_drop=data["gear_drop"],
+        name=name_var.get().strip(),
     )
 
 
-def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_units, buy_units):
+def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_units, buy_units, gear_drop, name):
     fig.clear()
     ax = fig.add_subplot(111)
     x_start, x_end = 0.0, 1.0
     levels = [
-        ("Avg cost", avg_cost, "gray", "-", f"{avg_cost:.2f} | U {current_u*100:.1f}%", 1.8),
-        ("Next buy", next_buy_price, "red", "-", f"{next_buy_price:.2f} | buy {buy_units:.3f}u", 2.2),
-        ("Sell T1 (50%)", sell_targets[0], "#0a8f08", "-", f"{sell_targets[0]:.2f}", 3.0),
-        ("Sell T2 (25%)", sell_targets[1], "#54c56a", "-.", f"{sell_targets[1]:.2f}", 2.2),
-        ("Sell T3 (25%)", sell_targets[2], "#9ad9a5", ":", f"{sell_targets[2]:.2f}", 1.4),
+        ("Avg cost", avg_cost, "black", "-", f"U {current_u*100:.1f}%", f"{avg_cost:.2f}", 3.4),
+        ("Next buy", next_buy_price, "red", "-", f"buy {buy_units:.3f}u", f"{next_buy_price:.2f}", 2.4),
+        ("Sell T1 (50%)", sell_targets[0], "#0a8f08", "-", "50%", f"{sell_targets[0]:.2f}", 3.0),
+        ("Sell T2 (25%)", sell_targets[1], "#0066cc", "-.", "25%", f"{sell_targets[1]:.2f}", 2.2),
+        ("Sell T3 (25%)", sell_targets[2], "#8a2be2", ":", "25%", f"{sell_targets[2]:.2f}", 1.6),
     ]
-    for label, y, color, style, extra, lw in levels:
+    for label, y, color, style, left_text, right_text, lw in levels:
         ax.plot([x_start, x_end], [y, y], color=color, linestyle=style, linewidth=lw)
         ax.text(
             x_start + 0.01,
             y,
-            f"{label} ({extra})",
+            f"{label} ({left_text})",
             va="center",
             ha="left",
             fontsize=9,
             color=color,
             backgroundcolor="white",
         )
+        ax.text(
+            x_end - 0.01,
+            y,
+            right_text,
+            va="center",
+            ha="right",
+            fontsize=9,
+            color=color,
+            backgroundcolor="white",
+        )
+    # Vertical gap annotations
+    gap_x = 0.5
+    # gap from avg to next buy
+    buy_gap_pct = -gear_drop
+    ax.plot([gap_x, gap_x], [next_buy_price, avg_cost], color="red", linestyle="--", linewidth=1.0)
+    ax.text(gap_x + 0.01, (next_buy_price + avg_cost) / 2, f"{buy_gap_pct:.1f}%", va="center", ha="left", fontsize=9, color="red")
+    # gaps for sells (each s step)
+    base = avg_cost
+    s_pct = (sell_targets[0] / avg_cost - 1) * 100 if avg_cost else 0
+    gaps = [
+        (avg_cost, sell_targets[0], s_pct),
+        (sell_targets[0], sell_targets[1], s_pct),
+        (sell_targets[1], sell_targets[2], s_pct),
+    ]
+    gap_color = "#0066cc"
+    for y0, y1, pct in gaps:
+        ax.plot([gap_x, gap_x], [y0, y1], color=gap_color, linestyle="--", linewidth=1.0)
+        ax.text(gap_x + 0.01, (y0 + y1) / 2, f"+{pct:.1f}%", va="center", ha="left", fontsize=9, color=gap_color)
+
     ymin = min(next_buy_price, avg_cost, *sell_targets)
     ymax = max(next_buy_price, avg_cost, *sell_targets)
     pad = (ymax - ymin) * 0.1 if ymax != ymin else 1
     ax.set_ylim(ymin - pad, ymax + pad)
     ax.set_xlim(x_start, x_end)
     ax.set_xticks([])
-    ax.set_title("Seesaw Targets")
+    ax.set_title(name or "")
     ax.set_ylabel("Price")
     ax.grid(False)
     ax.spines["top"].set_visible(False)
@@ -196,11 +226,11 @@ main.columnconfigure(0, weight=0)
 main.columnconfigure(1, weight=1)
 main.rowconfigure(0, weight=1)
 
+name_var = tk.StringVar()
 avg_cost_var = tk.StringVar()
 current_units_var = tk.StringVar()
 max_units_var = tk.StringVar()
 buy_model_var = tk.StringVar(value=list(BUY_MODELS.keys())[0])
-emergency_var = tk.IntVar(value=0)
 manual_sell_var = tk.IntVar(value=0)
 manual_gear_var = tk.StringVar(value="Gear1")
 result_var = tk.StringVar()
@@ -208,32 +238,33 @@ result_var = tk.StringVar()
 form = ttk.Frame(main)
 form.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
 
-ttk.Label(form, text="Average Cost").grid(row=0, column=0, sticky="e", padx=4, pady=4)
-ttk.Entry(form, textvariable=avg_cost_var, width=14).grid(
+ttk.Label(form, text="Name").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+ttk.Entry(form, textvariable=name_var, width=18).grid(
     row=0, column=1, sticky="w", padx=4, pady=4
 )
 
-ttk.Label(form, text="Current Units").grid(row=1, column=0, sticky="e", padx=4, pady=4)
-ttk.Entry(form, textvariable=current_units_var, width=14).grid(
+ttk.Label(form, text="Average Cost").grid(row=1, column=0, sticky="e", padx=4, pady=4)
+ttk.Entry(form, textvariable=avg_cost_var, width=14).grid(
     row=1, column=1, sticky="w", padx=4, pady=4
 )
 
-ttk.Label(form, text="Max Units").grid(row=2, column=0, sticky="e", padx=4, pady=4)
-ttk.Entry(form, textvariable=max_units_var, width=14).grid(
+ttk.Label(form, text="Current Units").grid(row=2, column=0, sticky="e", padx=4, pady=4)
+ttk.Entry(form, textvariable=current_units_var, width=14).grid(
     row=2, column=1, sticky="w", padx=4, pady=4
 )
 
-ttk.Label(form, text="Buy Model").grid(row=3, column=0, sticky="ne", padx=4, pady=4)
+ttk.Label(form, text="Max Units").grid(row=3, column=0, sticky="e", padx=4, pady=4)
+ttk.Entry(form, textvariable=max_units_var, width=14).grid(
+    row=3, column=1, sticky="w", padx=4, pady=4
+)
+
+ttk.Label(form, text="Buy Model").grid(row=4, column=0, sticky="ne", padx=4, pady=4)
 buy_frame = ttk.Frame(form)
-buy_frame.grid(row=3, column=1, sticky="w", padx=4, pady=4)
+buy_frame.grid(row=4, column=1, sticky="w", padx=4, pady=4)
 for name in BUY_MODELS:
     ttk.Radiobutton(buy_frame, text=name, value=name, variable=buy_model_var).pack(
         anchor="w"
     )
-
-ttk.Checkbutton(form, text="Emergency: Gear 1 (1/2/3%)", variable=emergency_var).grid(
-    row=4, column=0, columnspan=2, sticky="w", padx=4, pady=4
-)
 
 manual_frame = ttk.Frame(form)
 manual_frame.grid(row=5, column=0, columnspan=2, sticky="w", padx=4, pady=4)
@@ -264,7 +295,7 @@ output.columnconfigure(0, weight=1)
 output.rowconfigure(1, weight=1)
 
 ttk.Label(output, textvariable=result_var, justify="left").grid(
-    row=0, column=0, sticky="nw", pady=(0, 8)
+    row=0, column=0, sticky="nw", pady=(0, 8), padx=(0, 8)
 )
 
 fig = Figure(figsize=(6.5, 4.0), dpi=100)
