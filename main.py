@@ -137,20 +137,22 @@ def on_show():
         current_u=data["u"],
         max_units=max_units,
         buy_units=data["buy_units"],
-        gear_drop=data["gear_drop"],
+        gear_drop_pct=data["gear_drop"],
         name=name_var.get().strip(),
         new_avg=data["new_avg"],
+        new_u=data["new_u"],
     )
 
 
-def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_units, buy_units, gear_drop, name, new_avg):
+def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_units, buy_units, gear_drop_pct, name, new_avg, new_u):
     fig.clear()
     ax = fig.add_subplot(111)
     x_start, x_end = 0.0, 1.0
     volume_pct = current_u * 100
+    new_volume_pct = new_u * 100
     levels = [
-        ("Avg cost", avg_cost, "black", "-", f"volume/total = {volume_pct:.1f}%", f"{avg_cost:.2f}", 3.6),
-        ("Projected avg", new_avg, "#cccccc", "--", "after buy", f"{new_avg:.2f}", 1.4),
+        ("Avg cost", avg_cost, "black", "-", f"share = {volume_pct:.1f}%", f"{avg_cost:.2f}", 3.6),
+        ("Projected avg", new_avg, "#cccccc", "--", f"share = {new_volume_pct:.1f}%", f"{new_avg:.2f}", 1.4),
         ("Next buy", next_buy_price, "red", "-", f"buy {buy_units:.3f}u", f"{next_buy_price:.2f}", 2.4),
         ("Sell T1 (50%)", sell_targets[0], "#0a8f08", "-", "50%", f"{sell_targets[0]:.2f}", 3.0),
         ("Sell T2 (25%)", sell_targets[1], "#0066cc", "-.", "25%", f"{sell_targets[1]:.2f}", 2.2),
@@ -181,7 +183,7 @@ def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_units, bu
     # Vertical gap annotations
     gap_x = 0.5
     # gap from avg to next buy
-    buy_gap_pct = -gear_drop * 100
+    buy_gap_pct = -gear_drop_pct
     ax.plot([gap_x, gap_x], [next_buy_price, avg_cost], color="red", linestyle="--", linewidth=1.0)
     ax.text(gap_x + 0.01, (next_buy_price + avg_cost) / 2, f"{buy_gap_pct:.1f}%", va="center", ha="left", fontsize=9, color="red")
     # gaps for sells (each s step)
