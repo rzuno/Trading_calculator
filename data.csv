@@ -1,0 +1,5 @@
+name,avg_cost,num_shares,max_volume,buy_model,manual_mode,manual_gear,market,fx_rate
+Samsung,101600.0,21.0,25000000.0,"Agile (-5%,0.6)",0,Gear1,KR,1300.0
+SK hynix,576143.0,7.0,25000000.0,"Agile (-5%,0.6)",1,Gear6,KR,1300.0
+NVIDIA,204.8,4.0,25000000.0,"Agile (-5%,0.6)",0,Gear1,US,1460.0
+Alphabet,,,,"Agile (-5%,0.6)",0,Gear1,US,1460.0
