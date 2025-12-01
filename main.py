@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import os
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -41,9 +41,9 @@ MANUAL_SELL_GEARS = {
     "Gear1": {"name": "Gear1 (1/2/3%)", "s": 1.0},
     "Gear2": {"name": "Gear2 (2/4/6%)", "s": 2.0},
     "Gear3": {"name": "Gear3 (3/6/9%)", "s": 3.0},
-    "Gear4": {"name": "Gear4 (4/7/10%)", "s": 4.0},
-    "Gear5": {"name": "Gear5 (5/8/11%)", "s": 5.0},
-    "Gear6": {"name": "Gear6 (6/9/12%)", "s": 6.0},
+    "Gear4": {"name": "Gear4 (4/8/12%)", "s": 4.0},
+    "Gear5": {"name": "Gear5 (5/10/15%)", "s": 5.0},
+    "Gear6": {"name": "Gear6 (6/12/18%)", "s": 6.0},
 }
 
 stock_data = {}
