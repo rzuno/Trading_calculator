@@ -38,7 +38,7 @@ SELL_GEARS = [
 
 # Manual sell gears selectable by toggle
 MANUAL_SELL_GEARS = {
-    "Gear1": {"name": "Gear1 (1/2/3%)", "s": 1.0},
+    "Gear1": {"name": "Gear1 (1/2/3%) emergency", "s": 1.0},
     "Gear2": {"name": "Gear2 (2/4/6%)", "s": 2.0},
     "Gear3": {"name": "Gear3 (3/6/9%)", "s": 3.0},
     "Gear4": {"name": "Gear4 (4/8/12%)", "s": 4.0},
