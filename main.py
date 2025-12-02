@@ -254,7 +254,7 @@ def compute(
 
     manual_step_val = manual_step if manual_step is not None else 0.0
     if manual_mode:
-        active_step_pct = manual_step_val if manual_step_val > 0 else 1.0
+        active_step_pct = 1.0 + max(manual_step_val, 0.0)
         sell_mode = "Manual"
         ladder_pct = [active_step_pct, active_step_pct * 2, active_step_pct * 3]
     else:
@@ -675,7 +675,7 @@ def update_manual_label(*args):
         step_val = float(manual_gear_var.get())
     except (TypeError, ValueError):
         step_val = 0.0
-    effective_step = step_val if step_val > 0 else 1.0
+    effective_step = 1.0 + max(step_val, 0.0)
     label = f"Step {effective_step:.1f}% -> +{effective_step:.1f}% / +{2*effective_step:.1f}% / +{3*effective_step:.1f}%"
     manual_gear_label.config(text=label)
 
@@ -810,7 +810,7 @@ manual_slider = ttk.Scale(
 manual_slider.grid(row=2, column=0, sticky="w", pady=(0, 2))
 manual_gear_label = ttk.Label(manual_frame, text="")
 manual_gear_label.grid(row=3, column=0, sticky="w")
-ttk.Label(manual_frame, text="0 uses 1%/2%/3% ladder. >0 uses that % as base step.").grid(
+ttk.Label(manual_frame, text="Base step = 1% + slider (0 -> 1/2/3, 5 -> 6/12/18).").grid(
     row=4, column=0, sticky="w"
 )
 
