@@ -27,25 +27,6 @@ BUY_MODELS = {
     "Cautious (-7%,0.65)": {"gear_drop": 7.0, "r": 0.65},
 }
 
-# Automatic sell gears chosen by deployment ratio
-SELL_GEARS = [
-    {"name": "Gear1", "gear_num": 1, "min_u": 0.0, "max_u": 0.2, "s": 6.0},
-    {"name": "Gear2", "gear_num": 2, "min_u": 0.2, "max_u": 0.4, "s": 5.0},
-    {"name": "Gear3", "gear_num": 3, "min_u": 0.4, "max_u": 0.6, "s": 4.0},
-    {"name": "Gear4", "gear_num": 4, "min_u": 0.6, "max_u": 0.8, "s": 3.0},
-    {"name": "Gear5", "gear_num": 5, "min_u": 0.8, "max_u": 1.01, "s": 2.0},
-]
-
-# Manual sell gears selectable by toggle
-MANUAL_SELL_GEARS = {
-    "Gear1": {"name": "Gear1 (1/2/3%) emergency", "s": 1.0},
-    "Gear2": {"name": "Gear2 (2/4/6%)", "s": 2.0},
-    "Gear3": {"name": "Gear3 (3/6/9%)", "s": 3.0},
-    "Gear4": {"name": "Gear4 (4/8/12%)", "s": 4.0},
-    "Gear5": {"name": "Gear5 (5/10/15%)", "s": 5.0},
-    "Gear6": {"name": "Gear6 (6/12/18%)", "s": 6.0},
-}
-
 stock_data = {}
 stock_order = []
 
@@ -57,7 +38,11 @@ def default_record(market="KR"):
         "max_volume": "",
         "buy_model": list(BUY_MODELS.keys())[0],
         "manual_mode": 0,
-        "manual_gear": "Gear1",
+        "manual_gear": 0.0,
+        "g_score": 0.0,
+        "l_score": 0.0,
+        "g_date": "",
+        "l_date": "",
         "market": market,
         "fx_rate": GLOBAL_FX_RATE if market == "US" else 1.0,
     }
@@ -91,6 +76,30 @@ def load_data():
                 if fx_rate == "":
                     fx_rate = GLOBAL_FX_RATE if market == "US" else 1.0
                 manual_mode = int(row.get("manual_mode", 0)) if str(row.get("manual_mode", "0")).isdigit() else 0
+                g_score = to_float(row.get("g_score", ""))
+                l_score = to_float(row.get("l_score", ""))
+                if g_score == "":
+                    g_score = 0.0
+                if l_score == "":
+                    l_score = 0.0
+                g_date = (row.get("g_date") or "").strip()
+                l_date = (row.get("l_date") or "").strip()
+
+                def parse_manual_gear(val):
+                    try:
+                        return float(val)
+                    except (TypeError, ValueError):
+                        pass
+                    if isinstance(val, str) and val.lower().startswith("gear"):
+                        digits = "".join(ch for ch in val if ch.isdigit())
+                        if digits:
+                            try:
+                                return float(int(digits))
+                            except ValueError:
+                                return 0.0
+                    return 0.0
+
+                manual_gear_val = parse_manual_gear(row.get("manual_gear", 0.0))
 
                 stock_data[name] = {
                     "avg_cost": avg_cost,
@@ -100,7 +109,11 @@ def load_data():
                     "fx_rate": fx_rate,
                     "buy_model": row.get("buy_model", list(BUY_MODELS.keys())[0]),
                     "manual_mode": manual_mode,
-                    "manual_gear": row.get("manual_gear", "Gear1"),
+                    "manual_gear": manual_gear_val,
+                    "g_score": g_score,
+                    "l_score": l_score,
+                    "g_date": g_date,
+                    "l_date": l_date,
                 }
                 stock_order.append(name)
                 if market == "US":
@@ -120,6 +133,10 @@ def write_data_file():
         "buy_model",
         "manual_mode",
         "manual_gear",
+        "g_score",
+        "l_score",
+        "g_date",
+        "l_date",
         "market",
         "fx_rate",
     ]
@@ -136,22 +153,15 @@ def write_data_file():
                     "max_volume": rec.get("max_volume", ""),
                     "buy_model": rec.get("buy_model", list(BUY_MODELS.keys())[0]),
                     "manual_mode": rec.get("manual_mode", 0),
-                    "manual_gear": rec.get("manual_gear", "Gear1"),
+                    "manual_gear": rec.get("manual_gear", 0.0),
+                    "g_score": rec.get("g_score", ""),
+                    "l_score": rec.get("l_score", ""),
+                    "g_date": rec.get("g_date", ""),
+                    "l_date": rec.get("l_date", ""),
                     "market": rec.get("market", "KR"),
                     "fx_rate": rec.get("fx_rate", GLOBAL_FX_RATE if rec.get("market", "KR") == "US" else 1.0),
                 }
             )
-
-
-def pick_auto_sell_gear(u):
-    for gear in SELL_GEARS:
-        if gear["min_u"] <= u < gear["max_u"]:
-            return gear
-    return SELL_GEARS[-1]
-
-
-def pick_manual_sell_gear(key):
-    return MANUAL_SELL_GEARS.get(key, MANUAL_SELL_GEARS["Gear1"])
 
 
 def fmt_money(val, market="KR"):
@@ -176,7 +186,43 @@ def format_input(val, market="KR", is_money=True, decimals=2):
         return ""
 
 
-def compute(avg_cost, num_shares, max_volume_krw, buy_model_name, manual_mode, manual_key, market, fx_rate):
+def compute_penalty(f):
+    if f <= 0.4:
+        return 0.0
+    return -3.0 * (f - 0.4) / 0.6
+
+
+def compute_auto_gear(g_score, l_score, f, quantize=True):
+    trend = (3.0 * l_score + 2.0 * g_score) / 5.0
+    penalty = compute_penalty(f)
+    raw_gear = trend + penalty
+    gear = max(0.0, min(5.0, raw_gear))
+    if quantize:
+        gear = round(gear * 10.0) / 10.0
+    base_step = 1.0 + gear  # percent step for ladder
+    ladder = [base_step, 2.0 * base_step, 3.0 * base_step]
+    return {
+        "gear": gear,
+        "trend": trend,
+        "penalty": penalty,
+        "base_step": base_step,
+        "ladder": ladder,
+        "f": f,
+    }
+
+
+def compute(
+    avg_cost,
+    num_shares,
+    max_volume_krw,
+    buy_model_name,
+    manual_mode,
+    manual_step,
+    market,
+    fx_rate,
+    g_score,
+    l_score,
+):
     model = BUY_MODELS[buy_model_name]
     gear_drop_pct = model["gear_drop"]
     gear_drop = gear_drop_pct / 100
@@ -204,12 +250,19 @@ def compute(avg_cost, num_shares, max_volume_krw, buy_model_name, manual_mode, m
     new_volume_actual = new_avg_actual * new_shares_actual
     new_u_actual = new_volume_actual / max_volume if max_volume else 0.0
 
-    if manual_mode:
-        sell_gear = pick_manual_sell_gear(manual_key)
-    else:
-        sell_gear = pick_auto_sell_gear(u)
+    auto_gear = compute_auto_gear(g_score, l_score, u)
 
-    s = sell_gear["s"] / 100
+    manual_step_val = manual_step if manual_step is not None else 0.0
+    if manual_mode:
+        active_step_pct = manual_step_val if manual_step_val > 0 else 1.0
+        sell_mode = "Manual"
+        ladder_pct = [active_step_pct, active_step_pct * 2, active_step_pct * 3]
+    else:
+        active_step_pct = auto_gear["base_step"]
+        sell_mode = "Auto"
+        ladder_pct = auto_gear["ladder"]
+
+    s = active_step_pct / 100
     sell_targets = [
         avg_cost * (1 + s),
         avg_cost * (1 + 2 * s),
@@ -229,11 +282,15 @@ def compute(avg_cost, num_shares, max_volume_krw, buy_model_name, manual_mode, m
         "new_volume_actual": new_volume_actual,
         "u": u,
         "new_u_actual": new_u_actual,
-        "sell_gear": sell_gear,
+        "auto_gear": auto_gear,
+        "manual_step": manual_step_val,
+        "active_step": active_step_pct,
         "sell_targets": sell_targets,
-        "mode": "Manual" if manual_mode else "Auto",
+        "ladder_pct": ladder_pct,
+        "mode": sell_mode,
         "gear_drop_pct": gear_drop_pct,
         "buy_prop_actual": buy_prop_actual,
+        "active_manual": manual_mode,
     }
 
 
@@ -247,10 +304,24 @@ def parse_form_inputs():
         max_volume = to_float_str(max_volume_var.get())
         market = market_var.get()
         fx_rate = to_float_str(fx_rate_var.get()) if market == "US" else to_float_str(fx_rate_var.get() or GLOBAL_FX_RATE)
-        if avg_cost <= 0 or max_volume <= 0 or num_shares < 0 or fx_rate <= 0:
+        g_score = to_float_str(g_score_var.get())
+        l_score = to_float_str(l_score_var.get())
+        manual_step = to_float_str(manual_gear_var.get())
+        if (
+            avg_cost <= 0
+            or max_volume <= 0
+            or num_shares < 0
+            or fx_rate <= 0
+            or not (0 <= g_score <= 5)
+            or not (0 <= l_score <= 5)
+            or manual_step < 0
+        ):
             raise ValueError()
     except ValueError:
-        messagebox.showerror("Input error", "Use positive numbers (shares >= 0). FX must be > 0.")
+        messagebox.showerror(
+            "Input error",
+            "Use positive numbers (shares >= 0). FX must be > 0. G/L must be between 0 and 5. Manual gear >= 0.",
+        )
         return None
 
     return {
@@ -261,7 +332,11 @@ def parse_form_inputs():
         "fx_rate": fx_rate,
         "buy_model": buy_model_var.get(),
         "manual_mode": bool(manual_sell_var.get()),
-        "manual_key": manual_gear_var.get(),
+        "manual_step": manual_step,
+        "g_score": g_score,
+        "l_score": l_score,
+        "g_date": g_date_var.get().strip(),
+        "l_date": l_date_var.get().strip(),
     }
 
 
@@ -275,7 +350,17 @@ def fill_form_from_record(name):
     fx_rate_var.set(format_input(rec.get("fx_rate", GLOBAL_FX_RATE), "KR", decimals=2))
     buy_model_var.set(rec.get("buy_model", list(BUY_MODELS.keys())[0]))
     manual_sell_var.set(rec.get("manual_mode", 0))
-    manual_gear_var.set(rec.get("manual_gear", "Gear1"))
+    try:
+        manual_gear_val = float(rec.get("manual_gear", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        manual_gear_val = 0.0
+    manual_gear_var.set(manual_gear_val)
+    g_val = rec.get("g_score", "")
+    l_val = rec.get("l_score", "")
+    g_score_var.set("" if g_val == "" else format_input(g_val, "KR", is_money=False, decimals=1))
+    l_score_var.set("" if l_val == "" else format_input(l_val, "KR", is_money=False, decimals=1))
+    g_date_var.set(rec.get("g_date", ""))
+    l_date_var.set(rec.get("l_date", ""))
     update_manual_state()
     update_market_state()
 
@@ -289,7 +374,11 @@ def clear_form_fields():
     market_var.set("KR")
     buy_model_var.set(list(BUY_MODELS.keys())[0])
     manual_sell_var.set(0)
-    manual_gear_var.set("Gear1")
+    manual_gear_var.set(0.0)
+    g_score_var.set("0.0")
+    l_score_var.set("0.0")
+    g_date_var.set("")
+    l_date_var.set("")
     update_manual_state()
     update_market_state()
 
@@ -403,7 +492,11 @@ def on_save():
         "max_volume": parsed["max_volume"],
         "buy_model": parsed["buy_model"],
         "manual_mode": 1 if parsed["manual_mode"] else 0,
-        "manual_gear": parsed["manual_key"],
+        "manual_gear": parsed["manual_step"],
+        "g_score": parsed["g_score"],
+        "l_score": parsed["l_score"],
+        "g_date": parsed["g_date"],
+        "l_date": parsed["l_date"],
         "market": parsed["market"],
         "fx_rate": parsed["fx_rate"],
     }
@@ -430,30 +523,55 @@ def on_show():
         parsed["max_volume"],
         parsed["buy_model"],
         parsed["manual_mode"],
-        parsed["manual_key"],
+        parsed["manual_step"],
         parsed["market"],
         parsed["fx_rate"],
+        parsed["g_score"],
+        parsed["l_score"],
     )
 
-    sg = data["sell_gear"]
-    s = sg["s"]
+    auto_info = data["auto_gear"]
+    auto_ladder_pct = auto_info["ladder"]
+    auto_ladder_txt = f"+{auto_ladder_pct[0]:.1f}%/+{auto_ladder_pct[1]:.1f}%/+{auto_ladder_pct[2]:.1f}%"
     if parsed["manual_mode"]:
-        gear_label = f"Sell (Manual): {sg['name']} (+{s:.0f}%/+{2*s:.0f}%/+{3*s:.0f}%)"
+        ladder_pct = data["ladder_pct"]
+        gear_label = (
+            f"Sell (Manual): step={data['active_step']:.1f}% "
+            f"-> +{ladder_pct[0]:.1f}%/+{ladder_pct[1]:.1f}%/+{ladder_pct[2]:.1f}% "
+            f"(auto g={auto_info['gear']:.1f}, step={auto_info['base_step']:.1f}%)"
+        )
     else:
-        gear_label = f"Sell (Auto): gear {sg.get('gear_num', '?')} (+{s:.0f}%/+{2*s:.0f}%/+{3*s:.0f}%)"
+        ladder_pct = auto_ladder_pct
+        gear_label = (
+            f"Sell (Auto): g={auto_info['gear']:.1f} (trend={auto_info['trend']:.1f}, penalty={auto_info['penalty']:.1f}) "
+            f"step={auto_info['base_step']:.1f}% -> {auto_ladder_txt}"
+        )
 
-    deployment_text = f"Deployment percentage: {data['u']*100:.1f}% (current), {data['new_u_actual']*100:.1f}% (if actual buy fills)"
+    deployment_text = (
+        f"Deployment fraction f: {data['u']*100:.1f}% (current), {data['new_u_actual']*100:.1f}% (if actual buy fills)"
+    )
     share_after = data["new_u_actual"] * 100
     fmt_val = lambda val: fmt_money(val, parsed["market"])
 
+    gl_text = (
+        f"G={parsed['g_score']:.1f} ({parsed['g_date'] or 'date n/a'}), "
+        f"L={parsed['l_score']:.1f} ({parsed['l_date'] or 'date n/a'})"
+    )
+    auto_text = (
+        f"Auto gear -> g={auto_info['gear']:.1f} (trend={auto_info['trend']:.1f}, penalty={auto_info['penalty']:.1f}), "
+        f"step={auto_info['base_step']:.1f}% ({auto_ladder_txt})"
+    )
+
     result_lines = [
         f"Name: {name_var.get().strip() or '(none)'}",
+        gl_text,
         f"Buy model: {parsed['buy_model']}",
         f"Next buy trigger: {fmt_val(data['next_buy_price'])}",
         f"Current size: {fmt_val(data['current_volume'])}",
         f"Actual buy size: {fmt_val(data['buy_value_actual'])} (shares {int(data['buy_shares_actual'])}, proportion={data['buy_prop_actual']:.2f})",
         f"Projected avg (share = {share_after:.1f}%): {fmt_val(data['new_avg_actual'])}",
         deployment_text,
+        auto_text,
         gear_label,
         "Targets: " + " / ".join(fmt_val(val) for val in data["sell_targets"]),
     ]
@@ -551,13 +669,24 @@ def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_volume, b
     canvas.draw()
 
 
+def update_manual_label(*args):
+    # Update slider label to reflect ladder the user will get
+    try:
+        step_val = float(manual_gear_var.get())
+    except (TypeError, ValueError):
+        step_val = 0.0
+    effective_step = step_val if step_val > 0 else 1.0
+    label = f"Step {effective_step:.1f}% -> +{effective_step:.1f}% / +{2*effective_step:.1f}% / +{3*effective_step:.1f}%"
+    manual_gear_label.config(text=label)
+
+
 def update_manual_state():
     state_flag = manual_sell_var.get()
-    for rb in manual_gear_buttons:
-        if state_flag:
-            rb.state(["!disabled"])
-        else:
-            rb.state(["disabled"])
+    if state_flag:
+        manual_slider.state(["!disabled"])
+    else:
+        manual_slider.state(["disabled"])
+    update_manual_label()
 
 
 def update_market_state():
@@ -592,7 +721,11 @@ fx_rate_var = tk.StringVar()
 market_var = tk.StringVar(value="KR")
 buy_model_var = tk.StringVar(value=list(BUY_MODELS.keys())[0])
 manual_sell_var = tk.IntVar(value=0)
-manual_gear_var = tk.StringVar(value="Gear1")
+g_score_var = tk.StringVar(value="0.0")
+l_score_var = tk.StringVar(value="0.0")
+g_date_var = tk.StringVar()
+l_date_var = tk.StringVar()
+manual_gear_var = tk.DoubleVar(value=0.0)
 result_var = tk.StringVar()
 
 form = ttk.Frame(main)
@@ -645,30 +778,47 @@ buy_frame.grid(row=6, column=1, sticky="w", padx=4, pady=4)
 for name in BUY_MODELS:
     ttk.Radiobutton(buy_frame, text=name, value=name, variable=buy_model_var).pack(anchor="w")
 
+gl_frame = ttk.LabelFrame(form, text="G / L inputs")
+gl_frame.grid(row=7, column=0, columnspan=2, sticky="ew", padx=4, pady=4)
+ttk.Label(gl_frame, text="Global G (0-5)").grid(row=0, column=0, sticky="e", padx=4, pady=2)
+ttk.Entry(gl_frame, textvariable=g_score_var, width=8).grid(row=0, column=1, sticky="w", padx=4, pady=2)
+ttk.Label(gl_frame, text="As-of date").grid(row=0, column=2, sticky="e", padx=4, pady=2)
+ttk.Entry(gl_frame, textvariable=g_date_var, width=12).grid(row=0, column=3, sticky="w", padx=4, pady=2)
+ttk.Label(gl_frame, text="Local L (0-5)").grid(row=1, column=0, sticky="e", padx=4, pady=2)
+ttk.Entry(gl_frame, textvariable=l_score_var, width=8).grid(row=1, column=1, sticky="w", padx=4, pady=2)
+ttk.Label(gl_frame, text="As-of date").grid(row=1, column=2, sticky="e", padx=4, pady=2)
+ttk.Entry(gl_frame, textvariable=l_date_var, width=12).grid(row=1, column=3, sticky="w", padx=4, pady=2)
+
 manual_frame = ttk.Frame(form)
-manual_frame.grid(row=7, column=0, columnspan=2, sticky="w", padx=4, pady=4)
+manual_frame.grid(row=8, column=0, columnspan=2, sticky="w", padx=4, pady=4)
 ttk.Checkbutton(
     manual_frame,
     text="Manual sell gear",
     variable=manual_sell_var,
     command=update_manual_state,
-).grid(row=0, column=0, sticky="w")
-manual_gears_frame = ttk.Frame(manual_frame)
-manual_gears_frame.grid(row=1, column=0, sticky="w", pady=(4, 0))
-manual_gear_buttons = []
-for idx, key in enumerate(MANUAL_SELL_GEARS):
-    gear = MANUAL_SELL_GEARS[key]
-    rb = ttk.Radiobutton(
-        manual_gears_frame, text=gear["name"], value=key, variable=manual_gear_var
-    )
-    rb.grid(row=idx, column=0, sticky="w")
-    manual_gear_buttons.append(rb)
+).grid(row=0, column=0, sticky="w", pady=(0, 4))
+ttk.Label(manual_frame, text="Manual gear bar (0-5)").grid(row=1, column=0, sticky="w")
+manual_slider = ttk.Scale(
+    manual_frame,
+    from_=0.0,
+    to=5.0,
+    orient="horizontal",
+    variable=manual_gear_var,
+    command=update_manual_label,
+    length=220,
+)
+manual_slider.grid(row=2, column=0, sticky="w", pady=(0, 2))
+manual_gear_label = ttk.Label(manual_frame, text="")
+manual_gear_label.grid(row=3, column=0, sticky="w")
+ttk.Label(manual_frame, text="0 uses 1%/2%/3% ladder. >0 uses that % as base step.").grid(
+    row=4, column=0, sticky="w"
+)
 
 ttk.Button(form, text="Show Result", command=on_show).grid(
-    row=8, column=0, columnspan=2, pady=12, sticky="ew"
+    row=9, column=0, columnspan=2, pady=12, sticky="ew"
 )
 ttk.Button(form, text="Save Result", command=on_save).grid(
-    row=9, column=0, columnspan=2, pady=(0, 12), sticky="ew"
+    row=10, column=0, columnspan=2, pady=(0, 12), sticky="ew"
 )
 
 output = ttk.Frame(main)
