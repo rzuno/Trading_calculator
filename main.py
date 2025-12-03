@@ -41,6 +41,7 @@ def default_record(market="KR"):
         "manual_gear": 0.0,
         "g_score": 0.0,
         "l_score": 0.0,
+        "v_score": 1.0,
         "g_date": "",
         "l_date": "",
         "market": market,
@@ -82,6 +83,9 @@ def load_data():
                     g_score = 0.0
                 if l_score == "":
                     l_score = 0.0
+                v_score = to_float(row.get("v_score", ""))
+                if v_score == "":
+                    v_score = 1.0
                 g_date = (row.get("g_date") or "").strip()
                 l_date = (row.get("l_date") or "").strip()
 
@@ -112,6 +116,7 @@ def load_data():
                     "manual_gear": manual_gear_val,
                     "g_score": g_score,
                     "l_score": l_score,
+                    "v_score": v_score,
                     "g_date": g_date,
                     "l_date": l_date,
                 }
@@ -135,6 +140,7 @@ def write_data_file():
         "manual_gear",
         "g_score",
         "l_score",
+        "v_score",
         "g_date",
         "l_date",
         "market",
@@ -156,6 +162,7 @@ def write_data_file():
                     "manual_gear": rec.get("manual_gear", 0.0),
                     "g_score": rec.get("g_score", ""),
                     "l_score": rec.get("l_score", ""),
+                    "v_score": rec.get("v_score", ""),
                     "g_date": rec.get("g_date", ""),
                     "l_date": rec.get("l_date", ""),
                     "market": rec.get("market", "KR"),
@@ -192,8 +199,12 @@ def compute_penalty(f):
     return -3.0 * (f - 0.4) / 0.6
 
 
+def compute_trend(g_score, l_score):
+    return (3.0 * l_score + 2.0 * g_score) / 5.0
+
+
 def compute_auto_gear(g_score, l_score, f, quantize=True):
-    trend = (3.0 * l_score + 2.0 * g_score) / 5.0
+    trend = compute_trend(g_score, l_score)
     penalty = compute_penalty(f)
     raw_gear = trend + penalty
     gear = max(0.0, min(5.0, raw_gear))
@@ -211,6 +222,21 @@ def compute_auto_gear(g_score, l_score, f, quantize=True):
     }
 
 
+def compute_entry_threshold(g_score, l_score, v_score, quantize=True):
+    trend = compute_trend(g_score, l_score)
+    dip = 10.0 - trend + v_score
+    dip = min(12.0, max(5.0, dip))
+    if quantize:
+        dip = round(dip * 10.0) / 10.0
+    no_go = trend < 1.5
+    return {
+        "trend": trend,
+        "dip_pct": dip,
+        "no_go": no_go,
+        "v": v_score,
+    }
+
+
 def compute(
     avg_cost,
     num_shares,
@@ -222,6 +248,7 @@ def compute(
     fx_rate,
     g_score,
     l_score,
+    v_score,
 ):
     model = BUY_MODELS[buy_model_name]
     gear_drop_pct = model["gear_drop"]
@@ -291,6 +318,8 @@ def compute(
         "gear_drop_pct": gear_drop_pct,
         "buy_prop_actual": buy_prop_actual,
         "active_manual": manual_mode,
+        "trend": auto_gear["trend"],
+        "v_score": v_score,
     }
 
 
@@ -306,6 +335,7 @@ def parse_form_inputs():
         fx_rate = to_float_str(fx_rate_var.get()) if market == "US" else to_float_str(fx_rate_var.get() or GLOBAL_FX_RATE)
         g_score = to_float_str(g_score_var.get())
         l_score = to_float_str(l_score_var.get())
+        v_score = to_float_str(v_score_var.get())
         manual_step = to_float_str(manual_gear_var.get())
         if (
             avg_cost <= 0
@@ -314,13 +344,14 @@ def parse_form_inputs():
             or fx_rate <= 0
             or not (0 <= g_score <= 5)
             or not (0 <= l_score <= 5)
+            or not (0 <= v_score <= 2)
             or manual_step < 0
         ):
             raise ValueError()
     except ValueError:
         messagebox.showerror(
             "Input error",
-            "Use positive numbers (shares >= 0). FX must be > 0. G/L must be between 0 and 5. Manual gear >= 0.",
+            "Use positive numbers (shares >= 0). FX must be > 0. G/L must be between 0 and 5. V must be between 0 and 2. Manual gear >= 0.",
         )
         return None
 
@@ -335,6 +366,7 @@ def parse_form_inputs():
         "manual_step": manual_step,
         "g_score": g_score,
         "l_score": l_score,
+        "v_score": v_score,
         "g_date": g_date_var.get().strip(),
         "l_date": l_date_var.get().strip(),
     }
@@ -357,8 +389,10 @@ def fill_form_from_record(name):
     manual_gear_var.set(manual_gear_val)
     g_val = rec.get("g_score", "")
     l_val = rec.get("l_score", "")
+    v_val = rec.get("v_score", "")
     g_score_var.set("" if g_val == "" else format_input(g_val, "KR", is_money=False, decimals=1))
     l_score_var.set("" if l_val == "" else format_input(l_val, "KR", is_money=False, decimals=1))
+    v_score_var.set("" if v_val == "" else format_input(v_val, "KR", is_money=False, decimals=2))
     g_date_var.set(rec.get("g_date", ""))
     l_date_var.set(rec.get("l_date", ""))
     update_manual_state()
@@ -377,6 +411,7 @@ def clear_form_fields():
     manual_gear_var.set(0.0)
     g_score_var.set("0.0")
     l_score_var.set("0.0")
+    v_score_var.set("1.0")
     g_date_var.set("")
     l_date_var.set("")
     update_manual_state()
@@ -495,6 +530,7 @@ def on_save():
         "manual_gear": parsed["manual_step"],
         "g_score": parsed["g_score"],
         "l_score": parsed["l_score"],
+        "v_score": parsed["v_score"],
         "g_date": parsed["g_date"],
         "l_date": parsed["l_date"],
         "market": parsed["market"],
@@ -528,6 +564,7 @@ def on_show():
         parsed["fx_rate"],
         parsed["g_score"],
         parsed["l_score"],
+        parsed["v_score"],
     )
 
     auto_info = data["auto_gear"]
@@ -555,7 +592,8 @@ def on_show():
 
     gl_text = (
         f"G={parsed['g_score']:.1f} ({parsed['g_date'] or 'date n/a'}), "
-        f"L={parsed['l_score']:.1f} ({parsed['l_date'] or 'date n/a'})"
+        f"L={parsed['l_score']:.1f} ({parsed['l_date'] or 'date n/a'}), "
+        f"V={parsed['v_score']:.2f}"
     )
     auto_text = (
         f"Auto gear -> g={auto_info['gear']:.1f} (trend={auto_info['trend']:.1f}, penalty={auto_info['penalty']:.1f}), "
@@ -592,6 +630,64 @@ def on_show():
         market=parsed["market"],
         fx_rate=parsed["fx_rate"],
     )
+
+
+def open_entry_window():
+    # Use current G/L/V and market to compute entry trigger from v1.2 rules.
+    try:
+        g = float(str(g_score_var.get()).replace(",", ""))
+        l = float(str(l_score_var.get()).replace(",", ""))
+        v = float(str(v_score_var.get()).replace(",", ""))
+        if not (0 <= g <= 5) or not (0 <= l <= 5) or not (0 <= v <= 2):
+            raise ValueError()
+    except ValueError:
+        messagebox.showerror("Input error", "Set valid G/L (0-5) and V (0-2) before opening the entry window.")
+        return
+
+    entry_info = compute_entry_threshold(g, l, v)
+
+    top = tk.Toplevel(root)
+    top.title("Entry Decider (G/L/V)")
+    top.transient(root)
+    top.grab_set()
+
+    ttk.Label(top, text=f"G = {g:.1f}, L = {l:.1f}, V = {v:.2f}").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 2))
+    ttk.Label(top, text=f"Trend T = {entry_info['trend']:.1f}").grid(row=1, column=0, columnspan=2, sticky="w", padx=8, pady=2)
+    ttk.Label(top, text=f"Auto entry dip: {entry_info['dip_pct']:.1f}% below 10-day high").grid(row=2, column=0, columnspan=2, sticky="w", padx=8, pady=2)
+    if entry_info["no_go"]:
+        ttk.Label(top, foreground="red", text="No-go guard: T < 1.5 (manual check before entry).").grid(row=3, column=0, columnspan=2, sticky="w", padx=8, pady=2)
+
+    ttk.Label(top, text="10-day high price").grid(row=4, column=0, sticky="e", padx=8, pady=4)
+    high_var = tk.StringVar()
+    ttk.Entry(top, textvariable=high_var, width=18).grid(row=4, column=1, sticky="w", padx=4, pady=4)
+
+    entry_result_var = tk.StringVar()
+
+    def on_calc_entry():
+        try:
+            high_price = float(str(high_var.get()).replace(",", ""))
+            if high_price <= 0:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("Input error", "10-day high must be a positive number.")
+            return
+        entry_price = high_price * (1 - entry_info["dip_pct"] / 100.0)
+        lines = [
+            f"Trend T = {entry_info['trend']:.1f}",
+            f"Entry dip threshold: {entry_info['dip_pct']:.1f}% below 10-day high",
+            f"10-day high: {fmt_money(high_price, market_var.get())}",
+            f"Entry price target: {fmt_money(entry_price, market_var.get())}",
+        ]
+        if entry_info["no_go"]:
+            lines.append("No-go guard: T < 1.5 (skip new campaign).")
+        entry_result_var.set("\n".join(lines))
+
+    btn_frame = ttk.Frame(top)
+    btn_frame.grid(row=5, column=0, columnspan=2, pady=6)
+    ttk.Button(btn_frame, text="Show Entry Result", command=on_calc_entry).grid(row=0, column=0, padx=4)
+    ttk.Button(btn_frame, text="Close", command=top.destroy).grid(row=0, column=1, padx=4)
+
+    ttk.Label(top, textvariable=entry_result_var, justify="left").grid(row=6, column=0, columnspan=2, sticky="w", padx=8, pady=(4, 8))
 
 
 def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_volume, buy_value, buy_shares, gear_drop_pct, name, new_avg, new_u, market, fx_rate):
@@ -723,6 +819,7 @@ buy_model_var = tk.StringVar(value=list(BUY_MODELS.keys())[0])
 manual_sell_var = tk.IntVar(value=0)
 g_score_var = tk.StringVar(value="0.0")
 l_score_var = tk.StringVar(value="0.0")
+v_score_var = tk.StringVar(value="1.0")
 g_date_var = tk.StringVar()
 l_date_var = tk.StringVar()
 manual_gear_var = tk.DoubleVar(value=0.0)
@@ -788,6 +885,8 @@ ttk.Label(gl_frame, text="Local L (0-5)").grid(row=1, column=0, sticky="e", padx
 ttk.Entry(gl_frame, textvariable=l_score_var, width=8).grid(row=1, column=1, sticky="w", padx=4, pady=2)
 ttk.Label(gl_frame, text="As-of date").grid(row=1, column=2, sticky="e", padx=4, pady=2)
 ttk.Entry(gl_frame, textvariable=l_date_var, width=12).grid(row=1, column=3, sticky="w", padx=4, pady=2)
+ttk.Label(gl_frame, text="Volatility V (0-2)").grid(row=2, column=0, sticky="e", padx=4, pady=2)
+ttk.Entry(gl_frame, textvariable=v_score_var, width=8).grid(row=2, column=1, sticky="w", padx=4, pady=2)
 
 manual_frame = ttk.Frame(form)
 manual_frame.grid(row=8, column=0, columnspan=2, sticky="w", padx=4, pady=4)
@@ -814,11 +913,14 @@ ttk.Label(manual_frame, text="Base step = 1% + slider (0 -> 1/2/3, 5 -> 6/12/18)
     row=4, column=0, sticky="w"
 )
 
+ttk.Button(form, text="New Entry (G/L/V)", command=open_entry_window).grid(
+    row=9, column=0, columnspan=2, pady=(4, 4), sticky="ew"
+)
 ttk.Button(form, text="Show Result", command=on_show).grid(
-    row=9, column=0, columnspan=2, pady=12, sticky="ew"
+    row=10, column=0, columnspan=2, pady=12, sticky="ew"
 )
 ttk.Button(form, text="Save Result", command=on_save).grid(
-    row=10, column=0, columnspan=2, pady=(0, 12), sticky="ew"
+    row=11, column=0, columnspan=2, pady=(0, 12), sticky="ew"
 )
 
 output = ttk.Frame(main)
