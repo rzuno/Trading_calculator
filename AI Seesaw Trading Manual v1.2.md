@@ -35,16 +35,18 @@
 
 Let:
 
-- \( C_{\max} \): Max capital allocated to one stock in one campaign.
+- \( C_{\max} \): **Shared max capital** (one number used for every stock/campaign).
 - \( C_{\text{deployed}} \): Current deployed capital in that stock.
-- **Deployment fraction**:
+- **Deployment fraction (global)**:
   \[
-  f = \frac{C_{\text{deployed}}}{C_{\max}} \in [0,1]
+  f_{\text{global}} = \frac{\sum_i C_{\text{deployed}, i}}{\sum_i C_{\max, i}} \in [0,1]
   \]
 - Optional **scaled deployment** (for intuition only):
   \[
-  U = 5 \cdot f \in [0,5]
+  U = 5 \cdot f_{\text{global}} \in [0,5]
   \]
+
+**FX note**: A single FX rate is shared globally. Updating FX anywhere updates the shared rate used for all US valuations.
 
 Per stock we maintain:
 
@@ -98,7 +100,8 @@ At any moment:
 
 - \( G \in [0,5] \)
 - \( L \in [0,5] \)
-- Deployment fraction \( f \in [0,1] \)
+- **Global deployment fraction** \( f_{\text{global}} \in [0,1] \)
+  - Uses the single shared \( C_{\max} \) for all stocks.
 
 Compute Trend:
 
@@ -106,33 +109,33 @@ Compute Trend:
 T = \frac{3L + 2G}{5}
 \]
 
-### 3.2 Deployment penalty
+### 3.2 Deployment penalty (global)
 
-Heavier deployment → more conservative sell gear.
+Heavier **global** deployment → more conservative sell gear across every stock.
 
-Define penalty \( P(f) \):
+Define penalty \( P(f_{\text{global}}) \):
 
-- If \( f \le 0.4 \):  
+- If \( f_{\text{global}} \le 0.4 \):  
   \[
   P(f) = 0
   \]
-- If \( f > 0.4 \):  
+- If \( f_{\text{global}} > 0.4 \):  
   \[
-  P(f) = -3 \cdot \frac{f - 0.4}{0.6}
+  P(f) = -3 \cdot \frac{f_{\text{global}} - 0.4}{0.6}
   \]
 
 So:
 
-- \( f = 0.6 \Rightarrow P \approx -1 \)  
-- \( f = 0.8 \Rightarrow P \approx -2 \)  
-- \( f = 1.0 \Rightarrow P = -3 \)
+- \( f_{\text{global}} = 0.6 \Rightarrow P \approx -1 \)  
+- \( f_{\text{global}} = 0.8 \Rightarrow P \approx -2 \)  
+- \( f_{\text{global}} = 1.0 \Rightarrow P = -3 \)
 
 ### 3.3 Gear index and clamping
 
 Raw gear:
 
 \[
-g_{\text{raw}} = T + P(f)
+g_{\text{raw}} = T + P(f_{\text{global}})
 \]
 
 Clamp to \([0,5]\):
@@ -330,7 +333,7 @@ Example:
 def compute_penalty(f: float) -> float:
     """
     Deployment penalty.
-    f: fraction of capital deployed in [0, 1].
+    f: **global** fraction of capital deployed in [0, 1].
     For f <= 0.4: no penalty.
     For f > 0.4: linear penalty down to -3 at f = 1.0.
     """
@@ -360,7 +363,7 @@ def compute_auto_sell_gear(G: float, L: float, f: float,
         [s, 2s, 3s] profit targets in percent above average price.
     """
     T = compute_trend(G, L)
-    penalty = compute_penalty(f)
+    penalty = compute_penalty(f)  # f = global deployment fraction
 
     g_raw = T + penalty
     g = max(0.0, min(5.0, g_raw))

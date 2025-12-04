@@ -29,6 +29,7 @@ BUY_MODELS = {
 
 stock_data = {}
 stock_order = []
+GLOBAL_MAX_VOLUME_KRW = 0.0
 
 
 def default_record(market="KR"):
@@ -50,9 +51,10 @@ def default_record(market="KR"):
 
 
 def load_data():
-    global stock_order, stock_data, GLOBAL_FX_RATE
+    global stock_order, stock_data, GLOBAL_FX_RATE, GLOBAL_MAX_VOLUME_KRW
     stock_data = {}
     stock_order = []
+    GLOBAL_MAX_VOLUME_KRW = 0.0
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -121,12 +123,19 @@ def load_data():
                     "l_date": l_date,
                 }
                 stock_order.append(name)
-                if market == "US":
+                # Allow FX to be set from any row if a realistic value is present (>10 avoids overwriting with 1)
+                if fx_rate and fx_rate > 10:
                     GLOBAL_FX_RATE = fx_rate
+                if max_volume and max_volume > 0:
+                    GLOBAL_MAX_VOLUME_KRW = max_volume
     if not stock_order:
         for nm, mk in DEFAULT_NAMES:
             stock_order.append(nm)
             stock_data[nm] = default_record(mk)
+
+    # After loading, propagate global FX to all records
+    for rec in stock_data.values():
+        rec["fx_rate"] = GLOBAL_FX_RATE
 
 
 def write_data_file():
@@ -222,6 +231,30 @@ def compute_auto_gear(g_score, l_score, f, quantize=True):
     }
 
 
+def compute_total_deployment(current_name, cur_avg_cost, cur_num_shares, cur_max_volume_krw, cur_market, cur_fx_rate):
+    def current_volume_krw(avg_cost, num_shares, market, fx_rate):
+        if market == "US":
+            return avg_cost * num_shares * fx_rate
+        return avg_cost * num_shares
+
+    total_current = current_volume_krw(cur_avg_cost, cur_num_shares, cur_market, cur_fx_rate)
+
+    for name, rec in stock_data.items():
+        if name == current_name:
+            continue
+        try:
+            avg = float(rec.get("avg_cost", 0) or 0)
+            shares = float(rec.get("num_shares", 0) or 0)
+            fx = float(rec.get("fx_rate", GLOBAL_FX_RATE) or 0)
+        except (TypeError, ValueError):
+            avg = shares = fx = 0.0
+        market = rec.get("market", "KR")
+        total_current += current_volume_krw(avg, shares, market, fx)
+
+    global_max = GLOBAL_MAX_VOLUME_KRW if GLOBAL_MAX_VOLUME_KRW else cur_max_volume_krw
+    return total_current, global_max
+
+
 def compute_entry_threshold(g_score, l_score, v_score, quantize=True):
     trend = compute_trend(g_score, l_score)
     dip = 10.0 - trend + v_score
@@ -249,12 +282,14 @@ def compute(
     g_score,
     l_score,
     v_score,
+    name,
 ):
     model = BUY_MODELS[buy_model_name]
     gear_drop_pct = model["gear_drop"]
     gear_drop = gear_drop_pct / 100
     r = model["r"]
 
+    # Per-stock max volume for display/new_u
     if market == "US":
         max_volume = (max_volume_krw / fx_rate) if fx_rate else 0.0
     else:
@@ -262,6 +297,11 @@ def compute(
 
     current_volume = avg_cost * num_shares
     u = (current_volume / max_volume) if max_volume else 0.0
+
+    # Global penalty fraction uses shared max (or current stock max if shared not set)
+    global_max_krw = GLOBAL_MAX_VOLUME_KRW if GLOBAL_MAX_VOLUME_KRW else max_volume_krw
+    total_current, total_max = compute_total_deployment(name, avg_cost, num_shares, global_max_krw, market, fx_rate)
+    total_u = total_current / total_max if total_max else 0.0
 
     next_buy_price = avg_cost * (1 - gear_drop)
     buy_shares_calc = (r * num_shares) if num_shares > 0 else 1.0
@@ -277,7 +317,7 @@ def compute(
     new_volume_actual = new_avg_actual * new_shares_actual
     new_u_actual = new_volume_actual / max_volume if max_volume else 0.0
 
-    auto_gear = compute_auto_gear(g_score, l_score, u)
+    auto_gear = compute_auto_gear(g_score, l_score, total_u)
 
     manual_step_val = manual_step if manual_step is not None else 0.0
     if manual_mode:
@@ -308,6 +348,7 @@ def compute(
         "current_volume": current_volume,
         "new_volume_actual": new_volume_actual,
         "u": u,
+        "total_u": total_u,
         "new_u_actual": new_u_actual,
         "auto_gear": auto_gear,
         "manual_step": manual_step_val,
@@ -379,7 +420,7 @@ def fill_form_from_record(name):
     avg_cost_var.set("" if rec["avg_cost"] == "" else format_input(rec["avg_cost"], rec.get("market", "KR")))
     num_shares_var.set("" if rec["num_shares"] == "" else format_input(rec["num_shares"], rec.get("market", "KR"), is_money=False))
     max_volume_var.set("" if rec["max_volume"] == "" else format_input(rec["max_volume"], "KR"))
-    fx_rate_var.set(format_input(rec.get("fx_rate", GLOBAL_FX_RATE), "KR", decimals=2))
+    fx_rate_var.set(format_input(GLOBAL_FX_RATE, "KR", decimals=2))
     buy_model_var.set(rec.get("buy_model", list(BUY_MODELS.keys())[0]))
     manual_sell_var.set(rec.get("manual_mode", 0))
     try:
@@ -536,11 +577,15 @@ def on_save():
         "market": parsed["market"],
         "fx_rate": parsed["fx_rate"],
     }
-    if parsed["market"] == "US":
-        GLOBAL_FX_RATE = parsed["fx_rate"]
-        for _, rec in stock_data.items():
-            if rec.get("market") == "US":
-                rec["fx_rate"] = GLOBAL_FX_RATE
+    GLOBAL_FX_RATE = parsed["fx_rate"]
+    for _, rec in stock_data.items():
+        rec["fx_rate"] = GLOBAL_FX_RATE
+    global GLOBAL_MAX_VOLUME_KRW
+    GLOBAL_MAX_VOLUME_KRW = parsed["max_volume"]
+    for _, rec in stock_data.items():
+        rec["max_volume"] = GLOBAL_MAX_VOLUME_KRW
+    fx_rate_var.set(format_input(GLOBAL_FX_RATE, "KR", decimals=2))
+    max_volume_var.set(format_input(GLOBAL_MAX_VOLUME_KRW, "KR"))
     if selected not in stock_order:
         stock_order.append(selected)
 
@@ -552,6 +597,8 @@ def on_show():
     parsed = parse_form_inputs()
     if parsed is None:
         return
+
+    current_name = name_var.get().strip() or name_choice_var.get()
 
     data = compute(
         parsed["avg_cost"],
@@ -565,6 +612,7 @@ def on_show():
         parsed["g_score"],
         parsed["l_score"],
         parsed["v_score"],
+        current_name,
     )
 
     auto_info = data["auto_gear"]
@@ -585,7 +633,8 @@ def on_show():
         )
 
     deployment_text = (
-        f"Deployment fraction f: {data['u']*100:.1f}% (current), {data['new_u_actual']*100:.1f}% (if actual buy fills)"
+        f"Stock f: {data['u']*100:.1f}% (current), {data['new_u_actual']*100:.1f}% (if actual buy fills) | "
+        f"Global f: {data['total_u']*100:.1f}% (penalty uses global max)"
     )
     share_after = data["new_u_actual"] * 100
     fmt_val = lambda val: fmt_money(val, parsed["market"])
