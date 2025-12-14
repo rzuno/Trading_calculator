@@ -255,18 +255,21 @@ def compute_total_deployment(current_name, cur_avg_cost, cur_num_shares, cur_max
     return total_current, global_max
 
 
-def compute_entry_threshold(g_score, l_score, v_score, quantize=True):
-    trend = compute_trend(g_score, l_score)
-    dip = 10.0 - trend + v_score
-    dip = min(12.0, max(5.0, dip))
+def compute_entry_threshold(buy_model_name, quantize=True):
+    """
+    Entry now follows the selected buy gear drop (e.g., Agile -5% -> enter at -5% from peak).
+    """
+    model = BUY_MODELS.get(buy_model_name)
+    if not model:
+        # Fallback to the first defined model if something unexpected happens.
+        buy_model_name = next(iter(BUY_MODELS))
+        model = BUY_MODELS[buy_model_name]
+    dip = float(model.get("gear_drop", 0.0))
     if quantize:
         dip = round(dip * 10.0) / 10.0
-    no_go = trend < 1.5
     return {
-        "trend": trend,
         "dip_pct": dip,
-        "no_go": no_go,
-        "v": v_score,
+        "buy_model_name": buy_model_name,
     }
 
 
@@ -682,33 +685,22 @@ def on_show():
 
 
 def open_entry_window():
-    # Use current G/L/V and market to compute entry trigger from v1.2 rules.
-    try:
-        g = float(str(g_score_var.get()).replace(",", ""))
-        l = float(str(l_score_var.get()).replace(",", ""))
-        v = float(str(v_score_var.get()).replace(",", ""))
-        if not (0 <= g <= 5) or not (0 <= l <= 5) or not (0 <= v <= 2):
-            raise ValueError()
-    except ValueError:
-        messagebox.showerror("Input error", "Set valid G/L (0-5) and V (0-2) before opening the entry window.")
-        return
-
-    entry_info = compute_entry_threshold(g, l, v)
+    # Entry trigger now mirrors the chosen buy gear drop (no G/L/V formula).
+    entry_info = compute_entry_threshold(buy_model_var.get())
+    dip_pct = entry_info["dip_pct"]
+    buy_model_name = entry_info["buy_model_name"]
 
     top = tk.Toplevel(root)
-    top.title("Entry Decider (G/L/V)")
+    top.title("Entry Decider (Buy Gear)")
     top.transient(root)
     top.grab_set()
 
-    ttk.Label(top, text=f"G = {g:.1f}, L = {l:.1f}, V = {v:.2f}").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 2))
-    ttk.Label(top, text=f"Trend T = {entry_info['trend']:.1f}").grid(row=1, column=0, columnspan=2, sticky="w", padx=8, pady=2)
-    ttk.Label(top, text=f"Auto entry dip: {entry_info['dip_pct']:.1f}% below 10-day high").grid(row=2, column=0, columnspan=2, sticky="w", padx=8, pady=2)
-    if entry_info["no_go"]:
-        ttk.Label(top, foreground="red", text="No-go guard: T < 1.5 (manual check before entry).").grid(row=3, column=0, columnspan=2, sticky="w", padx=8, pady=2)
+    ttk.Label(top, text=f"Buy model: {buy_model_name}").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 2))
+    ttk.Label(top, text=f"Entry dip: {dip_pct:.1f}% below local peak").grid(row=1, column=0, columnspan=2, sticky="w", padx=8, pady=2)
 
-    ttk.Label(top, text="10-day high price").grid(row=4, column=0, sticky="e", padx=8, pady=4)
+    ttk.Label(top, text="Local peak price").grid(row=2, column=0, sticky="e", padx=8, pady=4)
     high_var = tk.StringVar()
-    ttk.Entry(top, textvariable=high_var, width=18).grid(row=4, column=1, sticky="w", padx=4, pady=4)
+    ttk.Entry(top, textvariable=high_var, width=18).grid(row=2, column=1, sticky="w", padx=4, pady=4)
 
     entry_result_var = tk.StringVar()
 
@@ -718,25 +710,23 @@ def open_entry_window():
             if high_price <= 0:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror("Input error", "10-day high must be a positive number.")
+            messagebox.showerror("Input error", "Local peak must be a positive number.")
             return
-        entry_price = high_price * (1 - entry_info["dip_pct"] / 100.0)
+        entry_price = high_price * (1 - dip_pct / 100.0)
         lines = [
-            f"Trend T = {entry_info['trend']:.1f}",
-            f"Entry dip threshold: {entry_info['dip_pct']:.1f}% below 10-day high",
-            f"10-day high: {fmt_money(high_price, market_var.get())}",
+            f"Buy model: {buy_model_name}",
+            f"Entry dip threshold: {dip_pct:.1f}% below local peak",
+            f"Local peak: {fmt_money(high_price, market_var.get())}",
             f"Entry price target: {fmt_money(entry_price, market_var.get())}",
         ]
-        if entry_info["no_go"]:
-            lines.append("No-go guard: T < 1.5 (skip new campaign).")
         entry_result_var.set("\n".join(lines))
 
     btn_frame = ttk.Frame(top)
-    btn_frame.grid(row=5, column=0, columnspan=2, pady=6)
+    btn_frame.grid(row=3, column=0, columnspan=2, pady=6)
     ttk.Button(btn_frame, text="Show Entry Result", command=on_calc_entry).grid(row=0, column=0, padx=4)
     ttk.Button(btn_frame, text="Close", command=top.destroy).grid(row=0, column=1, padx=4)
 
-    ttk.Label(top, textvariable=entry_result_var, justify="left").grid(row=6, column=0, columnspan=2, sticky="w", padx=8, pady=(4, 8))
+    ttk.Label(top, textvariable=entry_result_var, justify="left").grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(4, 8))
 
 
 def plot_levels(avg_cost, next_buy_price, sell_targets, current_u, max_volume, buy_value, buy_shares, gear_drop_pct, name, new_avg, new_u, market, fx_rate):
