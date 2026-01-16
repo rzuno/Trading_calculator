@@ -37,6 +37,12 @@ RESCUE_GEAR_COLORS = {
     3: "#8b5a2b",  # brown
 }
 
+RESCUE_U_SAT = 10.0
+RESCUE_DROP_MIN = 4.0
+RESCUE_DROP_SPAN = 2.0
+RESCUE_R_MIN = 0.5
+RESCUE_R_SPAN = 0.2
+
 # Ticker mappings for Yahoo Finance
 TICKER_MAP = {
     "Samsung": "005930.KS",      # Samsung Electronics on KRX
@@ -344,24 +350,30 @@ def round_half_up(val):
 
 def get_rescue_gear(units_held, N):
     """
-    Determine RESCUE gear based on position size (v1.4 V-Transmission).
+    Determine RESCUE gear based on position size (v1.3.7 smooth transmission).
 
-    N = total portfolio units (e.g., 25)
+    Smooth ramp based on deployed units:
+      - U_sat=10.0 (or N if smaller)
+      - drop_pct = 4.0 + 2.0 * t
+      - r = 0.5 + 0.2 * t
+      - gear = 1.0 + 2.0 * t
+      - t = clamp(0, (units-1)/(U_sat-1), 1)
 
     Returns: (drop_pct, r, gear) tuple
-        - Gear 1 (0-10% of N): -4% drop, r=0.5
-        - Gear 2 (10-25% of N): -5% drop, r=0.6
-        - Gear 3 (>25% of N): -6% drop, r=0.7
     """
-    u1 = ceil(0.10 * N)  # 10% threshold
-    u2 = ceil(0.25 * N)  # 25% threshold
-
-    if units_held <= u1:
-        return 4.0, 0.5, 1  # Gear 1: Ignition
-    elif units_held <= u2:
-        return 5.0, 0.6, 2  # Gear 2: Cruise
+    u_sat = RESCUE_U_SAT
+    if N and N > 0:
+        u_sat = min(RESCUE_U_SAT, float(N))
+    if u_sat <= 1.0:
+        t = 1.0
     else:
-        return 6.0, 0.7, 3  # Gear 3: Brake
+        t = (units_held - 1.0) / (u_sat - 1.0)
+    t = max(0.0, min(1.0, t))
+
+    drop_pct = RESCUE_DROP_MIN + RESCUE_DROP_SPAN * t
+    r = RESCUE_R_MIN + RESCUE_R_SPAN * t
+    gear = 1.0 + 2.0 * t
+    return drop_pct, r, gear
 
 
 def compute_rescue_trigger(avg_cost, units_held, N):
@@ -377,6 +389,8 @@ def compute_rescue_trigger(avg_cost, units_held, N):
     trigger_price = avg_cost * (1 - drop_pct / 100)
 
     buy_units = units_held * r
+    if N and N > 0:
+        buy_units = min(buy_units, max(0.0, N - units_held))
 
     return trigger_price, buy_units, gear, drop_pct, r
 
@@ -608,6 +622,7 @@ def compute_state(parsed, rec, current_name):
         current_name, avg_cost, num_shares, max_volume_krw, market, fx_rate
     )
     total_u = total_current / total_max if total_max else 0.0
+    total_units = total_u * PORTFOLIO_N if PORTFOLIO_N else 0.0
 
     auto_gear = compute_auto_gear(g_score, l_score, total_u)
     manual_step_val = parsed["manual_step"]
@@ -637,7 +652,7 @@ def compute_state(parsed, rec, current_name):
         buy_drop_pct = rescue_drop_pct
         buy_r = rescue_r
         buy_gear = rescue_gear
-        buy_label = f"G{rescue_gear}" if rescue_gear else "RESCUE"
+        buy_label = f"G{rescue_gear:.1f}" if rescue_gear else "RESCUE"
 
     buy_value_local = buy_units * unit_size_local if unit_size_local else 0.0
     if buy_price and buy_units > 0 and buy_value_local > 0:
@@ -686,6 +701,7 @@ def compute_state(parsed, rec, current_name):
         "active_step": active_step_pct,
         "sell_targets": sell_targets,
         "total_u": total_u,
+        "total_units": total_units,
     }
 
 
@@ -727,7 +743,6 @@ def parse_form_inputs():
     units_held, unit_size_krw, position_krw = compute_units_held(
         avg_cost, num_shares, max_volume, market, fx_rate
     )
-    units_held_var.set(f"{units_held:.2f}/{PORTFOLIO_N} units")
     unit_size_local = (unit_size_krw / fx_rate) if market == "US" and fx_rate else unit_size_krw
 
     return {
@@ -953,16 +968,22 @@ def update_display():
     market = parsed["market"]
     fmt_val = lambda val: fmt_or_na(val, market)
     fmt_price = lambda val: fmt_or_na(val, market) if val and val > 0 else "N/A"
+    units_held_var.set(
+        f"{parsed['units_held']:.2f}/{data['total_units']:.2f}/{PORTFOLIO_N} units"
+    )
     show_load_context = parsed["units_held"] <= 0
     high_context = data["high_ref"] if show_load_context else 0.0
     high_context_label = data["high_ref_label"]
 
     if parsed["units_held"] > 0 and data["rescue_gear"] > 0:
-        rescue_summary = f"Rescue G{data['rescue_gear']} (-{data['rescue_drop_pct']:.1f}%, r={data['rescue_r']:.1f})"
+        rescue_summary = (
+            f"Rescue G{data['rescue_gear']:.1f} "
+            f"(-{data['rescue_drop_pct']:.1f}%, r={data['rescue_r']:.2f})"
+        )
     else:
-        drop_pct, r, gear = get_rescue_gear(max(parsed["units_held"], 1), PORTFOLIO_N)
+        drop_pct, r, gear = get_rescue_gear(max(parsed["units_held"], 1.0), PORTFOLIO_N)
         suffix = " (next)" if parsed["units_held"] <= 0 else ""
-        rescue_summary = f"Rescue G{gear} (-{drop_pct:.1f}%, r={r:.1f}){suffix}"
+        rescue_summary = f"Rescue G{gear:.1f} (-{drop_pct:.1f}%, r={r:.2f}){suffix}"
     if show_load_context:
         buy_info_var.set(f"Load drop {data['load_drop_pct']:.1f}% ({data['high_ref_label']}) | {rescue_summary}")
     else:
@@ -994,8 +1015,8 @@ def update_display():
 
     if parsed["units_held"] > 0 and data["rescue_gear"] > 0:
         result_lines.append(
-            f"RESCUE G{data['rescue_gear']}: -{data['rescue_drop_pct']:.1f}% "
-            f"(r={data['rescue_r']:.1f}) -> {fmt_price(data['rescue_trigger'])} | Buy {data['rescue_qty']:.2f}u"
+            f"RESCUE G{data['rescue_gear']:.1f}: -{data['rescue_drop_pct']:.1f}% "
+            f"(r={data['rescue_r']:.2f}) -> {fmt_price(data['rescue_trigger'])} | Buy {data['rescue_qty']:.2f}u"
         )
     else:
         result_lines.append("RESCUE: N/A (no units)")
@@ -1090,8 +1111,12 @@ def plot_levels(
             left_text = f"-{buy_drop_pct:.1f}% {buy_units:.2f}u ~ {buy_shares} sh"
             label = "LOAD"
         else:
-            color = RESCUE_GEAR_COLORS.get(rescue_gear, "#d32f2f")
-            left_text = f"G{rescue_gear} (-{buy_drop_pct:.1f}%, r={rescue_r:.1f}) {buy_units:.2f}u ~ {buy_shares} sh"
+            gear_key = int(round(rescue_gear)) if rescue_gear else 0
+            color = RESCUE_GEAR_COLORS.get(gear_key, "#d32f2f")
+            left_text = (
+                f"G{rescue_gear:.1f} (-{buy_drop_pct:.1f}%, r={rescue_r:.2f}) "
+                f"{buy_units:.2f}u ~ {buy_shares} sh"
+            )
             label = f"Buy {buy_label}"
         levels.append((label, buy_price, color, "-", left_text, fmt_val(buy_price), 2.6))
     if projected_avg and projected_avg > 0 and avg_cost and avg_cost > 0:
@@ -1241,7 +1266,7 @@ name_choice_var = tk.StringVar()
 name_var = tk.StringVar()
 avg_cost_var = tk.StringVar()
 num_shares_var = tk.StringVar()
-units_held_var = tk.StringVar(value=f"0.00/{PORTFOLIO_N} units")
+units_held_var = tk.StringVar(value=f"0.00/0.00/{PORTFOLIO_N} units")
 max_volume_var = tk.StringVar()
 fx_rate_var = tk.StringVar()
 market_var = tk.StringVar(value="KR")

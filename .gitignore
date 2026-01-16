@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 env/
 venv/
-data.csv
+*.csv
 average_calculator.py
-*.md
+#*.md
+main_v14.py
