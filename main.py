@@ -376,7 +376,7 @@ def get_rescue_gear(units_held, N):
     return drop_pct, r, gear
 
 
-def compute_rescue_trigger(avg_cost, units_held, N):
+def compute_rescue_trigger(avg_cost, units_held, total_units, N):
     """
     RESCUE trigger price and buy quantity (v1.4).
 
@@ -390,7 +390,8 @@ def compute_rescue_trigger(avg_cost, units_held, N):
 
     buy_units = units_held * r
     if N and N > 0:
-        buy_units = min(buy_units, max(0.0, N - units_held))
+        remaining_units = max(0.0, N - total_units)
+        buy_units = min(buy_units, remaining_units)
 
     return trigger_price, buy_units, gear, drop_pct, r
 
@@ -446,7 +447,7 @@ def fetch_current_price(stock_name):
         hist_completed = hist.iloc[:-1] if len(hist) > 1 else hist
         if hist_completed.empty:
             hist_completed = hist
-        high_10d = hist_completed["High"].tail(HIGH_CONTEXT_DAYS).max()
+        high_10d = hist["High"].tail(HIGH_CONTEXT_DAYS).max()
         high_5d = hist_completed["High"].tail(LOAD_REF_DAYS).max()
 
         # Get today's data
@@ -603,10 +604,21 @@ def compute_state(parsed, rec, current_name):
     high_ref, high_ref_label = select_load_reference(high_5d, high_10d)
     load_trigger = compute_load_entry_price(high_ref, trend, v_score) if high_ref else 0.0
 
+    total_current, total_max = compute_total_deployment(
+        current_name, avg_cost, num_shares, max_volume_krw, market, fx_rate
+    )
+    total_u = total_current / total_max if total_max else 0.0
+    total_units = total_u * PORTFOLIO_N if PORTFOLIO_N else 0.0
+    remaining_units = max(0.0, PORTFOLIO_N - total_units) if PORTFOLIO_N else 0.0
+
     if high_ref <= 0:
         load_status = "Waiting for high"
     elif units_held > 0:
         load_status = "Blocked (units>0)"
+    elif remaining_units <= 0:
+        load_status = "Blocked (portfolio full)"
+    elif remaining_units < 1.0:
+        load_status = "Blocked (capacity<1u)"
     else:
         price_check = low_today if low_today > 0 else current_price
         if price_check > 0 and load_trigger > 0 and price_check <= load_trigger:
@@ -615,14 +627,8 @@ def compute_state(parsed, rec, current_name):
             load_status = "Watching"
 
     rescue_trigger, rescue_qty, rescue_gear, rescue_drop_pct, rescue_r = compute_rescue_trigger(
-        avg_cost, units_held, PORTFOLIO_N
+        avg_cost, units_held, total_units, PORTFOLIO_N
     )
-
-    total_current, total_max = compute_total_deployment(
-        current_name, avg_cost, num_shares, max_volume_krw, market, fx_rate
-    )
-    total_u = total_current / total_max if total_max else 0.0
-    total_units = total_u * PORTFOLIO_N if PORTFOLIO_N else 0.0
 
     auto_gear = compute_auto_gear(g_score, l_score, total_u)
     manual_step_val = parsed["manual_step"]
@@ -642,7 +648,7 @@ def compute_state(parsed, rec, current_name):
     buy_gear = 0
     buy_label = ""
     if units_held <= 0:
-        buy_units = 1 if load_trigger > 0 else 0
+        buy_units = 1 if load_trigger > 0 and remaining_units >= 1.0 else 0
         buy_price = load_trigger
         buy_drop_pct = load_drop_pct
         buy_label = "LOAD"
@@ -1304,7 +1310,7 @@ ttk.Entry(form, textvariable=num_shares_var, width=16).grid(
     row=2, column=1, sticky="w", padx=4, pady=4
 )
 
-ttk.Label(form, text="Units Held (auto)").grid(row=3, column=0, sticky="e", padx=4, pady=4)
+ttk.Label(form, text="stock/deployed/total").grid(row=3, column=0, sticky="e", padx=4, pady=4)
 ttk.Label(form, textvariable=units_held_var).grid(
     row=3, column=1, sticky="w", padx=4, pady=4
 )
