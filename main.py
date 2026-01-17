@@ -87,6 +87,8 @@ def default_record(market="KR"):
         "last_update": "",  # Timestamp of last price fetch
         "manual_sell_mode": 0,  # 0=auto, 1=manual
         "manual_sell_step": 0.0,  # Manual override value if enabled
+        "manual_load_mode": 0,  # 0=auto, 1=manual
+        "manual_load_drop": 0.0,  # Manual load drop override (3-7%)
         # Deprecated fields (kept for backward compatibility)
         "buy_model": list(BUY_MODELS.keys())[0],
         "manual_mode": 0,
@@ -165,6 +167,10 @@ def load_data():
                 manual_sell_step = to_float(row.get("manual_sell_step", 0.0))
                 if manual_sell_step == "":
                     manual_sell_step = 0.0
+                manual_load_mode = int(row.get("manual_load_mode", 0)) if str(row.get("manual_load_mode", "0")).isdigit() else 0
+                manual_load_drop = to_float(row.get("manual_load_drop", 0.0))
+                if manual_load_drop == "":
+                    manual_load_drop = 0.0
 
                 stock_data[name] = {
                     "avg_cost": avg_cost,
@@ -187,6 +193,8 @@ def load_data():
                     "last_update": last_update,
                     "manual_sell_mode": manual_sell_mode,
                     "manual_sell_step": manual_sell_step,
+                    "manual_load_mode": manual_load_mode,
+                    "manual_load_drop": manual_load_drop,
                     # Deprecated (backward compatibility)
                     "buy_model": row.get("buy_model", list(BUY_MODELS.keys())[0]),
                     "manual_mode": manual_mode,
@@ -231,6 +239,8 @@ def write_data_file():
         "last_update",
         "manual_sell_mode",
         "manual_sell_step",
+        "manual_load_mode",
+        "manual_load_drop",
         # Deprecated (backward compatibility)
         "buy_model",
         "manual_mode",
@@ -264,6 +274,8 @@ def write_data_file():
                     "last_update": rec.get("last_update", ""),
                     "manual_sell_mode": rec.get("manual_sell_mode", 0),
                     "manual_sell_step": rec.get("manual_sell_step", 0.0),
+                    "manual_load_mode": rec.get("manual_load_mode", 0),
+                    "manual_load_drop": rec.get("manual_load_drop", 0.0),
                     # Deprecated
                     "buy_model": rec.get("buy_model", list(BUY_MODELS.keys())[0]),
                     "manual_mode": rec.get("manual_mode", 0),
@@ -588,6 +600,8 @@ def compute_state(parsed, rec, current_name):
     v_score = parsed["v_score"]
     units_held = parsed["units_held"]
     unit_size_local = parsed["unit_size_local"]
+    manual_load_mode = parsed["manual_load_mode"]
+    manual_load_drop = parsed["manual_load_drop"]
 
     try:
         current_price = float(rec.get("current_price", 0) or 0)
@@ -600,9 +614,15 @@ def compute_state(parsed, rec, current_name):
     last_update = rec.get("last_update", "")
 
     trend = compute_trend(g_score, l_score)
-    load_drop_pct = compute_load_trigger(trend, v_score)
+    auto_load_drop_pct = compute_load_trigger(trend, v_score)
+    if manual_load_mode and manual_load_drop > 0:
+        load_drop_pct = max(3.0, min(7.0, manual_load_drop))
+        load_mode = "Manual"
+    else:
+        load_drop_pct = auto_load_drop_pct
+        load_mode = "Auto"
     high_ref, high_ref_label = select_load_reference(high_5d, high_10d)
-    load_trigger = compute_load_entry_price(high_ref, trend, v_score) if high_ref else 0.0
+    load_trigger = high_ref * (1 - load_drop_pct / 100) if high_ref else 0.0
 
     total_current, total_max = compute_total_deployment(
         current_name, avg_cost, num_shares, max_volume_krw, market, fx_rate
@@ -676,6 +696,7 @@ def compute_state(parsed, rec, current_name):
     return {
         "trend": trend,
         "load_drop_pct": load_drop_pct,
+        "load_mode": load_mode,
         "high_5d": high_5d,
         "high_10d": high_10d,
         "high_ref": high_ref,
@@ -728,6 +749,7 @@ def parse_form_inputs():
         l_score = to_float_str(l_score_var.get())
         v_score = to_float_str(v_score_var.get())
         manual_step = to_float_str(manual_gear_var.get(), 0.0)
+        manual_load_drop = to_float_str(manual_load_gear_var.get(), 0.0)
         if (
             avg_cost < 0
             or max_volume < 0
@@ -759,6 +781,8 @@ def parse_form_inputs():
         "fx_rate": fx_rate,
         "manual_mode": bool(manual_sell_var.get()),
         "manual_step": manual_step,
+        "manual_load_mode": bool(manual_load_var.get()),
+        "manual_load_drop": manual_load_drop,
         "g_score": g_score,
         "l_score": l_score,
         "v_score": v_score,
@@ -785,6 +809,12 @@ def fill_form_from_record(name):
     except (TypeError, ValueError):
         manual_gear_val = 0.0
     manual_gear_var.set(manual_gear_val)
+    manual_load_var.set(rec.get("manual_load_mode", 0))
+    try:
+        manual_load_val = float(rec.get("manual_load_drop", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        manual_load_val = 0.0
+    manual_load_gear_var.set(manual_load_val)
     g_val = rec.get("g_score", "")
     l_val = rec.get("l_score", "")
     v_val = rec.get("v_score", "")
@@ -794,6 +824,7 @@ def fill_form_from_record(name):
     g_date_var.set(rec.get("g_date", ""))
     l_date_var.set(rec.get("l_date", ""))
     update_manual_state()
+    update_manual_load_state()
     update_market_state()
 
 
@@ -801,18 +832,21 @@ def clear_form_fields():
     name_var.set("")
     avg_cost_var.set("")
     num_shares_var.set("")
-    units_held_var.set(f"0.00/{PORTFOLIO_N} units")
+    units_held_var.set(f"0.00/0.00/{PORTFOLIO_N} units")
     max_volume_var.set("")
     fx_rate_var.set(format_input(GLOBAL_FX_RATE, "KR", decimals=2))
     market_var.set("KR")
     manual_sell_var.set(0)
     manual_gear_var.set(0.0)
+    manual_load_var.set(0)
+    manual_load_gear_var.set(0.0)
     g_score_var.set("0.0")
     l_score_var.set("0.0")
     v_score_var.set("1.0")
     g_date_var.set("")
     l_date_var.set("")
     update_manual_state()
+    update_manual_load_state()
     update_market_state()
 
 
@@ -936,6 +970,8 @@ def on_save():
             "units_held": parsed["units_held"],
             "manual_sell_mode": 1 if parsed["manual_mode"] else 0,
             "manual_sell_step": parsed["manual_step"],
+            "manual_load_mode": 1 if parsed["manual_load_mode"] else 0,
+            "manual_load_drop": parsed["manual_load_drop"],
             # Deprecated fields for backward compatibility
             "manual_mode": 1 if parsed["manual_mode"] else 0,
             "manual_gear": parsed["manual_step"],
@@ -988,12 +1024,8 @@ def update_display():
         )
     else:
         drop_pct, r, gear = get_rescue_gear(max(parsed["units_held"], 1.0), PORTFOLIO_N)
-        suffix = " (next)" if parsed["units_held"] <= 0 else ""
-        rescue_summary = f"Rescue G{gear:.1f} (-{drop_pct:.1f}%, r={r:.2f}){suffix}"
-    if show_load_context:
-        buy_info_var.set(f"Load drop {data['load_drop_pct']:.1f}% ({data['high_ref_label']}) | {rescue_summary}")
-    else:
-        buy_info_var.set(f"Load drop {data['load_drop_pct']:.1f}% | {rescue_summary}")
+        rescue_summary = f"Rescue G{gear:.1f} (-{drop_pct:.1f}%, r={r:.2f})"
+    buy_info_var.set(f"Load drop {data['load_drop_pct']:.1f}% ({data['load_mode']}) | {rescue_summary}")
 
     sell_info_var.set(
         f"{data['sell_mode']} g={data['auto_gear']['gear']:.1f} "
@@ -1011,7 +1043,7 @@ def update_display():
         gl_text,
         f"Units: {units_held_var.get()} | Avg cost: {fmt_val(parsed['avg_cost'])}",
         f"Current: {fmt_price(data['current_price'])} | Low/High: {fmt_price(data['low_today'])}/{fmt_price(data['high_today'])}",
-        f"LOAD: drop {data['load_drop_pct']:.1f}% -> {fmt_price(data['load_trigger'])} | Status: {data['load_status']}",
+        f"LOAD: drop {data['load_drop_pct']:.1f}% ({data['load_mode']}) -> {fmt_price(data['load_trigger'])} | Status: {data['load_status']}",
     ]
     if show_load_context:
         result_lines.insert(
@@ -1245,6 +1277,27 @@ def update_manual_state():
     update_manual_label()
 
 
+def update_manual_load_label(*args):
+    try:
+        drop_val = float(manual_load_gear_var.get())
+    except (TypeError, ValueError):
+        drop_val = 0.0
+    clamped = max(3.0, min(7.0, drop_val))
+    if manual_load_var.get() and abs(clamped - drop_val) > 1e-6:
+        manual_load_gear_var.set(clamped)
+    manual_load_label.config(text=f"Load drop {clamped:.1f}%")
+    update_display()
+
+
+def update_manual_load_state():
+    state_flag = manual_load_var.get()
+    if state_flag:
+        manual_load_slider.state(["!disabled"])
+    else:
+        manual_load_slider.state(["disabled"])
+    update_manual_load_label()
+
+
 def update_market_state():
     # Always show FX and keep it editable for both KR and US; for KR it still stores a value.
     fx_entry.state(["!disabled"])
@@ -1283,6 +1336,8 @@ v_score_var = tk.StringVar(value="1.0")
 g_date_var = tk.StringVar()
 l_date_var = tk.StringVar()
 manual_gear_var = tk.DoubleVar(value=0.0)
+manual_load_var = tk.IntVar(value=0)
+manual_load_gear_var = tk.DoubleVar(value=3.0)
 result_var = tk.StringVar()
 buy_info_var = tk.StringVar()
 sell_info_var = tk.StringVar()
@@ -1381,6 +1436,25 @@ manual_gear_label.grid(row=3, column=0, sticky="w")
 ttk.Label(manual_frame, text="Base step = 1% + slider (0 -> 1/2, 5 -> 6/12).").grid(
     row=4, column=0, sticky="w"
 )
+ttk.Checkbutton(
+    manual_frame,
+    text="Manual load gear",
+    variable=manual_load_var,
+    command=update_manual_load_state,
+).grid(row=5, column=0, sticky="w", pady=(6, 4))
+ttk.Label(manual_frame, text="Load drop bar (3-7%)").grid(row=6, column=0, sticky="w")
+manual_load_slider = ttk.Scale(
+    manual_frame,
+    from_=3.0,
+    to=7.0,
+    orient="horizontal",
+    variable=manual_load_gear_var,
+    command=update_manual_load_label,
+    length=220,
+)
+manual_load_slider.grid(row=7, column=0, sticky="w", pady=(0, 2))
+manual_load_label = ttk.Label(manual_frame, text="")
+manual_load_label.grid(row=8, column=0, sticky="w")
 
 ttk.Button(form, text="Refresh Market Data", command=refresh_market_data).grid(
     row=11, column=0, columnspan=2, pady=(4, 4), sticky="ew"
@@ -1411,6 +1485,7 @@ main.columnconfigure(1, weight=1)
 load_data()
 refresh_name_list()
 update_manual_state()
+update_manual_load_state()
 update_market_state()
 
 root.mainloop()
