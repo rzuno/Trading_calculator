@@ -1416,33 +1416,11 @@ manual_frame = ttk.Frame(form)
 manual_frame.grid(row=10, column=0, columnspan=2, sticky="w", padx=4, pady=4)
 ttk.Checkbutton(
     manual_frame,
-    text="Manual sell gear",
-    variable=manual_sell_var,
-    command=update_manual_state,
-).grid(row=0, column=0, sticky="w", pady=(0, 4))
-ttk.Label(manual_frame, text="Manual gear bar (0-5)").grid(row=1, column=0, sticky="w")
-manual_slider = ttk.Scale(
-    manual_frame,
-    from_=0.0,
-    to=5.0,
-    orient="horizontal",
-    variable=manual_gear_var,
-    command=update_manual_label,
-    length=220,
-)
-manual_slider.grid(row=2, column=0, sticky="w", pady=(0, 2))
-manual_gear_label = ttk.Label(manual_frame, text="")
-manual_gear_label.grid(row=3, column=0, sticky="w")
-ttk.Label(manual_frame, text="Base step = 1% + slider (0 -> 1/2, 5 -> 6/12).").grid(
-    row=4, column=0, sticky="w"
-)
-ttk.Checkbutton(
-    manual_frame,
     text="Manual load gear",
     variable=manual_load_var,
     command=update_manual_load_state,
-).grid(row=5, column=0, sticky="w", pady=(6, 4))
-ttk.Label(manual_frame, text="Load drop bar (3-7%)").grid(row=6, column=0, sticky="w")
+).grid(row=0, column=0, sticky="w", pady=(0, 4))
+ttk.Label(manual_frame, text="Load drop bar (3-7%)").grid(row=1, column=0, sticky="w")
 manual_load_slider = ttk.Scale(
     manual_frame,
     from_=3.0,
@@ -1452,9 +1430,31 @@ manual_load_slider = ttk.Scale(
     command=update_manual_load_label,
     length=220,
 )
-manual_load_slider.grid(row=7, column=0, sticky="w", pady=(0, 2))
+manual_load_slider.grid(row=2, column=0, sticky="w", pady=(0, 2))
 manual_load_label = ttk.Label(manual_frame, text="")
-manual_load_label.grid(row=8, column=0, sticky="w")
+manual_load_label.grid(row=3, column=0, sticky="w")
+ttk.Checkbutton(
+    manual_frame,
+    text="Manual sell gear",
+    variable=manual_sell_var,
+    command=update_manual_state,
+).grid(row=4, column=0, sticky="w", pady=(6, 4))
+ttk.Label(manual_frame, text="Manual gear bar (0-5)").grid(row=5, column=0, sticky="w")
+manual_slider = ttk.Scale(
+    manual_frame,
+    from_=0.0,
+    to=5.0,
+    orient="horizontal",
+    variable=manual_gear_var,
+    command=update_manual_label,
+    length=220,
+)
+manual_slider.grid(row=6, column=0, sticky="w", pady=(0, 2))
+manual_gear_label = ttk.Label(manual_frame, text="")
+manual_gear_label.grid(row=7, column=0, sticky="w")
+ttk.Label(manual_frame, text="Base step = 1% + slider (0 -> 1/2, 5 -> 6/12).").grid(
+    row=8, column=0, sticky="w"
+)
 
 ttk.Button(form, text="Refresh Market Data", command=refresh_market_data).grid(
     row=11, column=0, columnspan=2, pady=(4, 4), sticky="ew"
