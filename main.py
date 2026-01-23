@@ -89,6 +89,7 @@ def default_record(market="KR"):
         "manual_sell_step": 0.0,  # Manual override value if enabled
         "manual_load_mode": 0,  # 0=auto, 1=manual
         "manual_load_drop": 0.0,  # Manual load drop override (3-7%)
+        "manual_rescue_mode": "AUTO",  # AUTO/DEFAULT/HEAVY/LIGHT
         # Deprecated fields (kept for backward compatibility)
         "buy_model": list(BUY_MODELS.keys())[0],
         "manual_mode": 0,
@@ -171,6 +172,9 @@ def load_data():
                 manual_load_drop = to_float(row.get("manual_load_drop", 0.0))
                 if manual_load_drop == "":
                     manual_load_drop = 0.0
+                manual_rescue_mode = (row.get("manual_rescue_mode") or "AUTO").strip().upper()
+                if manual_rescue_mode not in ("AUTO", "DEFAULT", "HEAVY", "LIGHT"):
+                    manual_rescue_mode = "AUTO"
 
                 stock_data[name] = {
                     "avg_cost": avg_cost,
@@ -195,6 +199,7 @@ def load_data():
                     "manual_sell_step": manual_sell_step,
                     "manual_load_mode": manual_load_mode,
                     "manual_load_drop": manual_load_drop,
+                    "manual_rescue_mode": manual_rescue_mode,
                     # Deprecated (backward compatibility)
                     "buy_model": row.get("buy_model", list(BUY_MODELS.keys())[0]),
                     "manual_mode": manual_mode,
@@ -241,6 +246,7 @@ def write_data_file():
         "manual_sell_step",
         "manual_load_mode",
         "manual_load_drop",
+        "manual_rescue_mode",
         # Deprecated (backward compatibility)
         "buy_model",
         "manual_mode",
@@ -276,6 +282,7 @@ def write_data_file():
                     "manual_sell_step": rec.get("manual_sell_step", 0.0),
                     "manual_load_mode": rec.get("manual_load_mode", 0),
                     "manual_load_drop": rec.get("manual_load_drop", 0.0),
+                    "manual_rescue_mode": rec.get("manual_rescue_mode", "AUTO"),
                     # Deprecated
                     "buy_model": rec.get("buy_model", list(BUY_MODELS.keys())[0]),
                     "manual_mode": rec.get("manual_mode", 0),
@@ -297,6 +304,14 @@ def fmt_money(val, market="KR"):
 def fmt_or_na(val, market="KR"):
     formatted = fmt_money(val, market)
     return formatted if formatted else "N/A"
+
+
+def fmt_compact(val):
+    try:
+        text = f"{float(val):.2f}"
+        return text.rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return ""
 
 
 def compute_unit_size_krw(max_volume_krw):
@@ -388,7 +403,7 @@ def get_rescue_gear(units_held, N):
     return drop_pct, r, gear
 
 
-def compute_rescue_trigger(avg_cost, units_held, total_units, N):
+def compute_rescue_trigger(avg_cost, units_held, total_units, N, drop_pct=None, r=None, gear=None):
     """
     RESCUE trigger price and buy quantity (v1.4).
 
@@ -397,7 +412,8 @@ def compute_rescue_trigger(avg_cost, units_held, total_units, N):
     if units_held <= 0:
         return avg_cost, 0, 0, 0.0, 0.0  # LOAD only when empty
 
-    drop_pct, r, gear = get_rescue_gear(units_held, N)
+    if drop_pct is None or r is None:
+        drop_pct, r, gear = get_rescue_gear(units_held, N)
     trigger_price = avg_cost * (1 - drop_pct / 100)
 
     buy_units = units_held * r
@@ -602,6 +618,7 @@ def compute_state(parsed, rec, current_name):
     unit_size_local = parsed["unit_size_local"]
     manual_load_mode = parsed["manual_load_mode"]
     manual_load_drop = parsed["manual_load_drop"]
+    manual_rescue_mode = parsed["manual_rescue_mode"]
 
     try:
         current_price = float(rec.get("current_price", 0) or 0)
@@ -646,9 +663,28 @@ def compute_state(parsed, rec, current_name):
         else:
             load_status = "Watching"
 
-    rescue_trigger, rescue_qty, rescue_gear, rescue_drop_pct, rescue_r = compute_rescue_trigger(
-        avg_cost, units_held, total_units, PORTFOLIO_N
-    )
+    rescue_override = None
+    rescue_label = "Auto"
+    if manual_rescue_mode != "AUTO":
+        if manual_rescue_mode == "LIGHT":
+            rescue_override = (4.0, 0.5, 1)
+            rescue_label = "Light"
+        elif manual_rescue_mode == "HEAVY":
+            rescue_override = (6.0, 0.7, 3)
+            rescue_label = "Heavy"
+        else:
+            rescue_override = (5.0, 0.6, 2)
+            rescue_label = "Default"
+
+    if rescue_override:
+        rescue_drop_pct, rescue_r, rescue_gear = rescue_override
+        rescue_trigger, rescue_qty, _, _, _ = compute_rescue_trigger(
+            avg_cost, units_held, total_units, PORTFOLIO_N, rescue_drop_pct, rescue_r, rescue_gear
+        )
+    else:
+        rescue_trigger, rescue_qty, rescue_gear, rescue_drop_pct, rescue_r = compute_rescue_trigger(
+            avg_cost, units_held, total_units, PORTFOLIO_N
+        )
 
     auto_gear = compute_auto_gear(g_score, l_score, total_u)
     manual_step_val = parsed["manual_step"]
@@ -678,7 +714,10 @@ def compute_state(parsed, rec, current_name):
         buy_drop_pct = rescue_drop_pct
         buy_r = rescue_r
         buy_gear = rescue_gear
-        buy_label = f"G{rescue_gear:.1f}" if rescue_gear else "RESCUE"
+        if rescue_override:
+            buy_label = f"Rescue {rescue_label}"
+        else:
+            buy_label = f"G{rescue_gear:.1f}" if rescue_gear else "RESCUE"
 
     buy_value_local = buy_units * unit_size_local if unit_size_local else 0.0
     if buy_price and buy_units > 0 and buy_value_local > 0:
@@ -712,6 +751,7 @@ def compute_state(parsed, rec, current_name):
         "rescue_gear": rescue_gear,
         "rescue_drop_pct": rescue_drop_pct,
         "rescue_r": rescue_r,
+        "rescue_mode": rescue_label if rescue_override else "Auto",
         "buy_units": buy_units,
         "buy_price": buy_price,
         "buy_drop_pct": buy_drop_pct,
@@ -783,6 +823,7 @@ def parse_form_inputs():
         "manual_step": manual_step,
         "manual_load_mode": bool(manual_load_var.get()),
         "manual_load_drop": manual_load_drop,
+        "manual_rescue_mode": manual_rescue_var.get().strip().upper() or "AUTO",
         "g_score": g_score,
         "l_score": l_score,
         "v_score": v_score,
@@ -815,6 +856,10 @@ def fill_form_from_record(name):
     except (TypeError, ValueError):
         manual_load_val = 0.0
     manual_load_gear_var.set(manual_load_val)
+    manual_rescue_mode = (rec.get("manual_rescue_mode", "AUTO") or "AUTO").strip().upper()
+    if manual_rescue_mode not in ("AUTO", "DEFAULT", "HEAVY", "LIGHT"):
+        manual_rescue_mode = "AUTO"
+    manual_rescue_var.set(manual_rescue_mode)
     g_val = rec.get("g_score", "")
     l_val = rec.get("l_score", "")
     v_val = rec.get("v_score", "")
@@ -840,6 +885,7 @@ def clear_form_fields():
     manual_gear_var.set(0.0)
     manual_load_var.set(0)
     manual_load_gear_var.set(0.0)
+    manual_rescue_var.set("AUTO")
     g_score_var.set("0.0")
     l_score_var.set("0.0")
     v_score_var.set("1.0")
@@ -972,6 +1018,7 @@ def on_save():
             "manual_sell_step": parsed["manual_step"],
             "manual_load_mode": 1 if parsed["manual_load_mode"] else 0,
             "manual_load_drop": parsed["manual_load_drop"],
+            "manual_rescue_mode": parsed["manual_rescue_mode"],
             # Deprecated fields for backward compatibility
             "manual_mode": 1 if parsed["manual_mode"] else 0,
             "manual_gear": parsed["manual_step"],
@@ -1018,14 +1065,32 @@ def update_display():
     high_context_label = data["high_ref_label"]
 
     if parsed["units_held"] > 0 and data["rescue_gear"] > 0:
+        rescue_tag = (
+            f"Rescue {data['rescue_mode']}"
+            if data["rescue_mode"] != "Auto"
+            else f"Rescue G{data['rescue_gear']:.1f}"
+        )
         rescue_summary = (
-            f"Rescue G{data['rescue_gear']:.1f} "
-            f"(-{data['rescue_drop_pct']:.1f}%, r={data['rescue_r']:.2f})"
+            f"{rescue_tag} (-{fmt_compact(data['rescue_drop_pct'])}%, r={fmt_compact(data['rescue_r'])})"
         )
     else:
-        drop_pct, r, gear = get_rescue_gear(max(parsed["units_held"], 1.0), PORTFOLIO_N)
-        rescue_summary = f"Rescue G{gear:.1f} (-{drop_pct:.1f}%, r={r:.2f})"
-    buy_info_var.set(f"Load drop {data['load_drop_pct']:.1f}% ({data['load_mode']}) | {rescue_summary}")
+        if parsed["manual_rescue_mode"] != "AUTO":
+            if parsed["manual_rescue_mode"] == "LIGHT":
+                drop_pct, r, gear = 4.0, 0.5, 1
+                rescue_tag = "Rescue Light"
+            elif parsed["manual_rescue_mode"] == "HEAVY":
+                drop_pct, r, gear = 6.0, 0.7, 3
+                rescue_tag = "Rescue Heavy"
+            else:
+                drop_pct, r, gear = 5.0, 0.6, 2
+                rescue_tag = "Rescue Default"
+        else:
+            drop_pct, r, gear = get_rescue_gear(max(parsed["units_held"], 1.0), PORTFOLIO_N)
+            rescue_tag = f"Rescue G{gear:.1f}"
+        rescue_summary = f"{rescue_tag} (-{fmt_compact(drop_pct)}%, r={fmt_compact(r)})"
+    buy_info_var.set(
+        f"Load {data['load_mode']} drop {data['load_drop_pct']:.1f}%\n{rescue_summary}"
+    )
 
     sell_info_var.set(
         f"{data['sell_mode']} g={data['auto_gear']['gear']:.1f} "
@@ -1052,9 +1117,14 @@ def update_display():
         )
 
     if parsed["units_held"] > 0 and data["rescue_gear"] > 0:
+        rescue_title = (
+            f"RESCUE {data['rescue_mode'].upper()}"
+            if data["rescue_mode"] != "Auto"
+            else f"RESCUE G{data['rescue_gear']:.1f}"
+        )
         result_lines.append(
-            f"RESCUE G{data['rescue_gear']:.1f}: -{data['rescue_drop_pct']:.1f}% "
-            f"(r={data['rescue_r']:.2f}) -> {fmt_price(data['rescue_trigger'])} | Buy {data['rescue_qty']:.2f}u"
+            f"{rescue_title}: -{fmt_compact(data['rescue_drop_pct'])}% "
+            f"(r={fmt_compact(data['rescue_r'])}) -> {fmt_price(data['rescue_trigger'])} | Buy {data['rescue_qty']:.2f}u"
         )
     else:
         result_lines.append("RESCUE: N/A (no units)")
@@ -1151,8 +1221,9 @@ def plot_levels(
         else:
             gear_key = int(round(rescue_gear)) if rescue_gear else 0
             color = RESCUE_GEAR_COLORS.get(gear_key, "#d32f2f")
+            rescue_text = buy_label.replace("Rescue ", "")
             left_text = (
-                f"G{rescue_gear:.1f} (-{buy_drop_pct:.1f}%, r={rescue_r:.2f}) "
+                f"{rescue_text} (-{fmt_compact(buy_drop_pct)}%, r={fmt_compact(rescue_r)}) "
                 f"{buy_units:.2f}u ~ {buy_shares} sh"
             )
             label = f"Buy {buy_label}"
@@ -1298,6 +1369,10 @@ def update_manual_load_state():
     update_manual_load_label()
 
 
+def update_manual_rescue_state(*args):
+    update_display()
+
+
 def update_market_state():
     # Always show FX and keep it editable for both KR and US; for KR it still stores a value.
     fx_entry.state(["!disabled"])
@@ -1307,6 +1382,17 @@ def update_market_state():
         avg_cost_label.config(text="Average Cost ($)")
     else:
         avg_cost_label.config(text="Average Cost (₩)")
+
+
+def center_window(window):
+    window.update_idletasks()
+    width = window.winfo_reqwidth()
+    height = window.winfo_reqheight()
+    screen_w = window.winfo_screenwidth()
+    screen_h = window.winfo_screenheight()
+    x = int((screen_w - width) / 2)
+    y = int((screen_h - height) / 2)
+    window.geometry(f"{width}x{height}+{x}+{y}")
 
 
 # ---------------- UI ----------------
@@ -1338,6 +1424,7 @@ l_date_var = tk.StringVar()
 manual_gear_var = tk.DoubleVar(value=0.0)
 manual_load_var = tk.IntVar(value=0)
 manual_load_gear_var = tk.DoubleVar(value=3.0)
+manual_rescue_var = tk.StringVar(value="AUTO")
 result_var = tk.StringVar()
 buy_info_var = tk.StringVar()
 sell_info_var = tk.StringVar()
@@ -1350,10 +1437,6 @@ name_frame = ttk.Frame(form)
 name_frame.grid(row=0, column=1, sticky="w", padx=4, pady=4)
 name_radio_frame = ttk.Frame(name_frame)
 name_radio_frame.grid(row=0, column=0, sticky="w")
-name_btn_frame = ttk.Frame(name_frame)
-name_btn_frame.grid(row=1, column=0, sticky="w", pady=(6, 0))
-ttk.Button(name_btn_frame, text="Add New", command=on_add_new).grid(row=0, column=0, sticky="w", padx=(0, 6))
-ttk.Button(name_btn_frame, text="Delete", command=on_delete_stock).grid(row=0, column=1, sticky="w")
 
 avg_cost_label = ttk.Label(form, text="Average Cost (₩)")
 avg_cost_label.grid(row=1, column=0, sticky="e", padx=4, pady=4)
@@ -1391,7 +1474,7 @@ ttk.Label(fx_frame, text="FX rate (₩ per $)").grid(row=0, column=0, sticky="e"
 fx_entry = ttk.Entry(fx_frame, textvariable=fx_rate_var, width=16)
 fx_entry.grid(row=0, column=1, sticky="w")
 
-buy_frame = ttk.LabelFrame(form, text="Buy (Auto)")
+buy_frame = ttk.LabelFrame(form, text="Buy")
 buy_frame.grid(row=7, column=0, columnspan=2, sticky="ew", padx=4, pady=4)
 ttk.Label(buy_frame, textvariable=buy_info_var, justify="left").grid(row=0, column=0, sticky="w")
 
@@ -1433,13 +1516,44 @@ manual_load_slider = ttk.Scale(
 manual_load_slider.grid(row=2, column=0, sticky="w", pady=(0, 2))
 manual_load_label = ttk.Label(manual_frame, text="")
 manual_load_label.grid(row=3, column=0, sticky="w")
+ttk.Label(manual_frame, text="Manual rescue gear").grid(row=4, column=0, sticky="w", pady=(6, 2))
+manual_rescue_frame = ttk.Frame(manual_frame)
+manual_rescue_frame.grid(row=5, column=0, sticky="w")
+ttk.Radiobutton(
+    manual_rescue_frame,
+    text="Auto (-4~-6%, 0.5~0.7)",
+    value="AUTO",
+    variable=manual_rescue_var,
+    command=update_manual_rescue_state,
+).grid(row=0, column=0, sticky="w")
+ttk.Radiobutton(
+    manual_rescue_frame,
+    text="Default (-5%, 0.6)",
+    value="DEFAULT",
+    variable=manual_rescue_var,
+    command=update_manual_rescue_state,
+).grid(row=1, column=0, sticky="w")
+ttk.Radiobutton(
+    manual_rescue_frame,
+    text="Heavy (-6%, 0.7)",
+    value="HEAVY",
+    variable=manual_rescue_var,
+    command=update_manual_rescue_state,
+).grid(row=2, column=0, sticky="w")
+ttk.Radiobutton(
+    manual_rescue_frame,
+    text="Light (-4%, 0.5)",
+    value="LIGHT",
+    variable=manual_rescue_var,
+    command=update_manual_rescue_state,
+).grid(row=3, column=0, sticky="w")
 ttk.Checkbutton(
     manual_frame,
     text="Manual sell gear",
     variable=manual_sell_var,
     command=update_manual_state,
-).grid(row=4, column=0, sticky="w", pady=(6, 4))
-ttk.Label(manual_frame, text="Manual gear bar (0-5)").grid(row=5, column=0, sticky="w")
+).grid(row=6, column=0, sticky="w", pady=(6, 4))
+ttk.Label(manual_frame, text="Manual gear bar (0-5)").grid(row=7, column=0, sticky="w")
 manual_slider = ttk.Scale(
     manual_frame,
     from_=0.0,
@@ -1449,11 +1563,11 @@ manual_slider = ttk.Scale(
     command=update_manual_label,
     length=220,
 )
-manual_slider.grid(row=6, column=0, sticky="w", pady=(0, 2))
+manual_slider.grid(row=8, column=0, sticky="w", pady=(0, 2))
 manual_gear_label = ttk.Label(manual_frame, text="")
-manual_gear_label.grid(row=7, column=0, sticky="w")
+manual_gear_label.grid(row=9, column=0, sticky="w")
 ttk.Label(manual_frame, text="Base step = 1% + slider (0 -> 1/2, 5 -> 6/12).").grid(
-    row=8, column=0, sticky="w"
+    row=10, column=0, sticky="w"
 )
 
 ttk.Button(form, text="Refresh Market Data", command=refresh_market_data).grid(
@@ -1487,5 +1601,6 @@ refresh_name_list()
 update_manual_state()
 update_manual_load_state()
 update_market_state()
+center_window(root)
 
 root.mainloop()
