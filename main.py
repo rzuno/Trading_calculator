@@ -30,6 +30,7 @@ MANUAL_TRAITS = []
 perk_font = None
 perk_check_style = None
 perk_radio_style = None
+bold_label_style = None
 
 
 def load_trait_config():
@@ -151,6 +152,14 @@ def default_record(market="KR"):
         "atr_3d_pct": 0.0,
         "atr_5d_pct": 0.0,
         "fx_avg": GLOBAL_FX_AVG_RATE,
+        "applied_buy_gear": "",
+        "applied_sell_gear": "",
+        "applied_buy_points": "",
+        "applied_sell_points": "",
+        "applied_buy_shift": "",
+        "applied_sell_shift": "",
+        "applied_action": "",
+        "applied_timestamp": "",
         "manual_sell_mode": 0,  # 0=auto, 1=manual
         "manual_sell_step": 0.0,  # Manual override value if enabled
         "manual_load_mode": 0,  # 0=auto, 1=manual
@@ -247,6 +256,14 @@ def load_data():
                 atr_3d_pct = to_float(row.get("atr_3d_pct", 0.0))
                 atr_5d_pct = to_float(row.get("atr_5d_pct", 0.0))
                 fx_avg = to_float(row.get("fx_avg", GLOBAL_FX_AVG_RATE))
+                applied_buy_gear = to_float(row.get("applied_buy_gear", ""))
+                applied_sell_gear = to_float(row.get("applied_sell_gear", ""))
+                applied_buy_points = to_float(row.get("applied_buy_points", ""))
+                applied_sell_points = to_float(row.get("applied_sell_points", ""))
+                applied_buy_shift = to_float(row.get("applied_buy_shift", ""))
+                applied_sell_shift = to_float(row.get("applied_sell_shift", ""))
+                applied_action = (row.get("applied_action") or "").strip()
+                applied_timestamp = (row.get("applied_timestamp") or "").strip()
                 last_update = (row.get("last_update") or "").strip()
                 manual_sell_mode = int(row.get("manual_sell_mode", 0)) if str(row.get("manual_sell_mode", "0")).isdigit() else 0
                 manual_sell_step = to_float(row.get("manual_sell_step", 0.0))
@@ -288,6 +305,14 @@ def load_data():
                     "atr_3d_pct": atr_3d_pct if atr_3d_pct != "" else 0.0,
                     "atr_5d_pct": atr_5d_pct if atr_5d_pct != "" else 0.0,
                     "fx_avg": fx_avg if fx_avg != "" else GLOBAL_FX_AVG_RATE,
+                    "applied_buy_gear": applied_buy_gear,
+                    "applied_sell_gear": applied_sell_gear,
+                    "applied_buy_points": applied_buy_points,
+                    "applied_sell_points": applied_sell_points,
+                    "applied_buy_shift": applied_buy_shift,
+                    "applied_sell_shift": applied_sell_shift,
+                    "applied_action": applied_action,
+                    "applied_timestamp": applied_timestamp,
                     "last_update": last_update,
                     "manual_sell_mode": manual_sell_mode,
                     "manual_sell_step": manual_sell_step,
@@ -350,6 +375,14 @@ def write_data_file():
         "atr_3d_pct",
         "atr_5d_pct",
         "fx_avg",
+        "applied_buy_gear",
+        "applied_sell_gear",
+        "applied_buy_points",
+        "applied_sell_points",
+        "applied_buy_shift",
+        "applied_sell_shift",
+        "applied_action",
+        "applied_timestamp",
         "last_update",
         "manual_sell_mode",
         "manual_sell_step",
@@ -396,6 +429,14 @@ def write_data_file():
                     "atr_3d_pct": rec.get("atr_3d_pct", 0.0),
                     "atr_5d_pct": rec.get("atr_5d_pct", 0.0),
                     "fx_avg": rec.get("fx_avg", GLOBAL_FX_AVG_RATE),
+                    "applied_buy_gear": rec.get("applied_buy_gear", ""),
+                    "applied_sell_gear": rec.get("applied_sell_gear", ""),
+                    "applied_buy_points": rec.get("applied_buy_points", ""),
+                    "applied_sell_points": rec.get("applied_sell_points", ""),
+                    "applied_buy_shift": rec.get("applied_buy_shift", ""),
+                    "applied_sell_shift": rec.get("applied_sell_shift", ""),
+                    "applied_action": rec.get("applied_action", ""),
+                    "applied_timestamp": rec.get("applied_timestamp", ""),
                     "last_update": rec.get("last_update", ""),
                     "manual_sell_mode": rec.get("manual_sell_mode", 0),
                     "manual_sell_step": rec.get("manual_sell_step", 0.0),
@@ -1264,20 +1305,47 @@ def format_recommendation_text(rec, current_buy_gear, current_sell_gear):
 def get_current_stock_name():
     return name_var.get().strip() or name_choice_var.get()
 
-
 def get_rec_state(stock_name):
     if stock_name not in rec_states:
-        rec_states[stock_name] = {"previous_gears": None, "rec_locked": False, "latest": None}
+        rec_states[stock_name] = {"latest": None}
     return rec_states[stock_name]
 
 
-def sync_apply_button(state):
-    if not apply_btn:
+def get_base_gears():
+    base_buy = float(TRAIT_SYSTEM.get("base_buy_gear", 3.0))
+    base_sell = float(TRAIT_SYSTEM.get("base_sell_gear", 3.0))
+    return base_buy, base_sell
+
+
+def update_apply_status_display(stock_name):
+    if not stock_name or stock_name not in stock_data:
+        apply_status_var.set("")
+        apply_status_label.config(fg="#b71c1c")
         return
-    if state.get("rec_locked") and state.get("previous_gears"):
-        apply_btn.config(text="Applied ✓", bg="#2e7d32", activebackground="#1b5e20")
+    rec = stock_data[stock_name]
+    action = rec.get("applied_action", "")
+    ts = rec.get("applied_timestamp", "")
+    if not action:
+        apply_status_var.set("No change has been made.")
+        apply_status_label.config(fg="#b71c1c")
+        return
+    if action == "applied":
+        buy_pts = fmt_points(rec.get("applied_buy_points", 0))
+        sell_pts = fmt_points(rec.get("applied_sell_points", 0))
+        buy_shift = rec.get("applied_buy_shift", 0)
+        sell_shift = rec.get("applied_sell_shift", 0)
+        msg = (
+            f"Applied {ts} | buy {buy_pts}, sell {sell_pts} "
+            f"=> shift {buy_shift:+.1f}/{sell_shift:+.1f}"
+        )
+        apply_status_var.set(msg)
+        apply_status_label.config(fg="#2e7d32")
+    elif action == "canceled":
+        apply_status_var.set(f"Canceled {ts} | back to base gears")
+        apply_status_label.config(fg="#f57c00")
     else:
-        apply_btn.config(text="Apply", bg="#c62828", activebackground="#b71c1c")
+        apply_status_var.set(f"No change applied. Updated {ts}")
+        apply_status_label.config(fg="#b71c1c")
 
 
 def parse_form_inputs():
@@ -1379,6 +1447,7 @@ def on_select_stock(selected=None):
     name_choice_var.set(choice)
     fill_form_from_record(choice)
     update_display()
+    update_apply_status_display(choice)
 
 
 def refresh_name_list(selected=None):
@@ -1620,13 +1689,13 @@ def update_display(force_recommendation=False):
 
     state = get_rec_state(current_name)
     perk = state.get("latest")
-    recompute = (not state.get("rec_locked")) or force_recommendation or perk is None
-    if recompute:
+    if force_recommendation or perk is None:
         perk = compute_perk_gears(metrics, manual_states)
         state["latest"] = perk
 
     if perk:
-        recommendation_warning_var.set(f"Ratio: {fmt_ratio(perk['ratio'])}")
+        recommendation_warning_var.set("")
+        ratio_var.set(f"  Ratio {fmt_ratio(perk['ratio'])}")
 
         auto_buy = sum(trait.get("buy_points", 0) for trait in perk["active_auto"])
         auto_sell = sum(trait.get("sell_points", 0) for trait in perk["active_auto"])
@@ -1669,12 +1738,12 @@ def update_display(force_recommendation=False):
     else:
         auto_points_var.set("Auto total: buy +0 / sell +0")
         manual_points_var.set("Manual total: buy +0 / sell +0")
+        ratio_var.set("  Ratio 0:1")
         auto_traits_text.config(state="normal")
         auto_traits_text.delete("1.0", tk.END)
         auto_traits_text.insert("1.0", "(none)")
         auto_traits_text.config(state="disabled")
-
-    sync_apply_button(state)
+    update_apply_status_display(current_name)
 
     plot_levels(
         name=current_name,
@@ -1714,23 +1783,43 @@ def apply_recommendation():
     state = get_rec_state(stock_name)
     perk = state.get("latest")
     if not perk:
+        update_display(force_recommendation=True)
+        perk = state.get("latest")
+    if not perk:
         messagebox.showinfo("Recommendation", "No recommendation available.")
         return
-    if state.get("previous_gears"):
-        messagebox.showinfo("Recommendation", "Change is already applied. Use Cancel to revert.")
+
+    base_buy, base_sell = get_base_gears()
+    target_buy = round(base_buy + float(perk.get("buy_shift", 0)), 1)
+    target_sell = round(base_sell + float(perk.get("sell_shift", 0)), 1)
+    current_buy = float(buy_gear_var.get())
+    current_sell = float(sell_gear_var.get())
+
+    now_ts = datetime.now().strftime("%y%m%d %H:%M")
+    rec = stock_data.get(stock_name, default_record())
+    rec["applied_buy_points"] = perk.get("buy_points", 0)
+    rec["applied_sell_points"] = perk.get("sell_points", 0)
+    rec["applied_buy_shift"] = perk.get("buy_shift", 0)
+    rec["applied_sell_shift"] = perk.get("sell_shift", 0)
+    rec["applied_buy_gear"] = target_buy
+    rec["applied_sell_gear"] = target_sell
+    rec["applied_timestamp"] = now_ts
+
+    if abs(target_buy - current_buy) < 1e-6 and abs(target_sell - current_sell) < 1e-6:
+        rec["applied_action"] = "no_change"
+        stock_data[stock_name] = rec
+        write_data_file()
+        update_apply_status_display(stock_name)
+        messagebox.showinfo("Recommendation", "No change applied.")
         return
-    state["previous_gears"] = (buy_gear_var.get(), sell_gear_var.get())
-    target_buy = float(perk.get("buy_gear", buy_gear_var.get()))
-    target_sell = float(perk.get("sell_gear", sell_gear_var.get()))
-    if abs(target_buy - float(buy_gear_var.get())) < 1e-6 and abs(target_sell - float(sell_gear_var.get())) < 1e-6:
-        messagebox.showinfo("Recommendation", "Recommendation not applied (no change).")
-        state["previous_gears"] = None
-        return
+
     buy_gear_var.set(target_buy)
     sell_gear_var.set(target_sell)
-    state["rec_locked"] = True
+    rec["applied_action"] = "applied"
+    stock_data[stock_name] = rec
+    write_data_file()
     update_display()
-    sync_apply_button(state)
+    update_apply_status_display(stock_name)
     messagebox.showinfo("Recommendation", "Change is applied.")
 
 
@@ -1739,38 +1828,26 @@ def cancel_recommendation():
     if not stock_name:
         messagebox.showinfo("Recommendation", "No stock selected.")
         return
-    state = get_rec_state(stock_name)
-    if not state.get("previous_gears"):
-        messagebox.showinfo("Recommendation", "No previous gear setting to restore.")
-        return
-    buy_gear_var.set(state["previous_gears"][0])
-    sell_gear_var.set(state["previous_gears"][1])
-    state["previous_gears"] = None
-    state["rec_locked"] = False
+    base_buy, base_sell = get_base_gears()
+    buy_gear_var.set(round(base_buy, 1))
+    sell_gear_var.set(round(base_sell, 1))
+    rec = stock_data.get(stock_name, default_record())
+    rec["applied_action"] = "canceled"
+    rec["applied_timestamp"] = datetime.now().strftime("%y%m%d %H:%M")
+    stock_data[stock_name] = rec
+    write_data_file()
     update_display(force_recommendation=True)
-    sync_apply_button(state)
+    update_apply_status_display(stock_name)
 
 
 def toggle_apply():
-    stock_name = get_current_stock_name()
-    if not stock_name:
-        messagebox.showinfo("Recommendation", "No stock selected.")
-        return
-    state = get_rec_state(stock_name)
-    if state.get("rec_locked"):
-        cancel_recommendation()
-    else:
-        apply_recommendation()
+    apply_recommendation()
 
 
 def refresh_recommendation():
     stock_name = get_current_stock_name()
     if not stock_name:
         messagebox.showinfo("Recommendation", "No stock selected.")
-        return
-    state = get_rec_state(stock_name)
-    if state.get("previous_gears"):
-        messagebox.showinfo("Recommendation", "Cancel first to unlock refresh.")
         return
     update_display(force_recommendation=True)
 
@@ -2008,10 +2085,15 @@ try:
         perk_radio_style = "Perk.TRadiobutton"
         ttk.Style(root).configure(perk_check_style, font=perk_font)
         ttk.Style(root).configure(perk_radio_style, font=perk_font)
+    bold_font = tkfont.nametofont("TkDefaultFont").copy()
+    bold_font.configure(weight="bold")
+    bold_label_style = "RecBold.TLabel"
+    ttk.Style(root).configure(bold_label_style, font=bold_font)
 except tk.TclError:
     perk_font = None
     perk_check_style = None
     perk_radio_style = None
+    bold_label_style = None
 
 main = ttk.Frame(root, padding=12)
 main.grid(sticky="nsew")
@@ -2045,6 +2127,9 @@ manual_trait_vars = {}
 manual_group_vars = {}
 rec_states = {}
 apply_btn = None
+cancel_btn = None
+apply_status_var = tk.StringVar()
+ratio_var = tk.StringVar()
 
 form = ttk.Frame(main)
 form.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
@@ -2203,7 +2288,10 @@ auto_traits_text = tk.Text(recommend, **auto_traits_kwargs)
 auto_traits_text.grid(row=1, column=0, sticky="ew", padx=6)
 auto_traits_text.config(state="disabled")
 
-ttk.Label(recommend, textvariable=auto_points_var, justify="left").grid(
+auto_points_label = ttk.Label(recommend, textvariable=auto_points_var, justify="left")
+if bold_label_style:
+    auto_points_label.configure(style=bold_label_style)
+auto_points_label.grid(
     row=2, column=0, sticky="w", padx=6, pady=(0, 2)
 )
 
@@ -2300,28 +2388,52 @@ for category, perks in manual_nonexclusive_by_category.items():
 ttk.Label(recommend, textvariable=recommendation_warning_var, justify="left").grid(
     row=5, column=0, sticky="w", padx=6, pady=(6, 2)
 )
-ttk.Label(recommend, textvariable=manual_points_var, justify="left").grid(
+manual_points_label = ttk.Label(recommend, textvariable=manual_points_var, justify="left")
+if bold_label_style:
+    manual_points_label.configure(style=bold_label_style)
+manual_points_label.grid(
     row=6, column=0, sticky="w", padx=6, pady=(0, 2)
+)
+ttk.Label(recommend, textvariable=ratio_var, justify="left").grid(
+    row=7, column=0, sticky="w", padx=6, pady=(0, 2)
 )
 ttk.Label(
     recommend,
     textvariable=recommendation_var,
     justify="left",
     wraplength=240,
-).grid(row=7, column=0, sticky="nw", padx=6, pady=(0, 6))
+).grid(row=8, column=0, sticky="nw", padx=6, pady=(0, 6))
 ttk.Button(recommend, text="Refresh", command=refresh_recommendation).grid(
-    row=8, column=0, sticky="ew", padx=6, pady=(0, 4)
+    row=9, column=0, sticky="ew", padx=6, pady=(0, 4)
 )
 apply_btn = tk.Button(
     recommend,
     text="Apply",
     command=lambda: toggle_apply(),
-    bg="#c62828",
+    bg="#2e7d32",
     fg="white",
-    activebackground="#b71c1c",
+    activebackground="#1b5e20",
     activeforeground="white",
 )
-apply_btn.grid(row=9, column=0, sticky="ew", padx=6, pady=(0, 6))
+apply_btn.grid(row=10, column=0, sticky="ew", padx=6, pady=(0, 4))
+cancel_btn = tk.Button(
+    recommend,
+    text="Cancel",
+    command=lambda: cancel_recommendation(),
+    bg="#9e9e9e",
+    fg="white",
+    activebackground="#757575",
+    activeforeground="white",
+)
+cancel_btn.grid(row=11, column=0, sticky="ew", padx=6, pady=(0, 4))
+apply_status_label = tk.Label(
+    recommend,
+    textvariable=apply_status_var,
+    anchor="w",
+    justify="left",
+    fg="#b71c1c",
+)
+apply_status_label.grid(row=12, column=0, sticky="ew", padx=6, pady=(0, 6))
 
 main.rowconfigure(0, weight=1)
 main.columnconfigure(1, weight=1)

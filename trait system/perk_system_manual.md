@@ -63,10 +63,12 @@ These values are computed at refresh time:
 7. Special rule: if `black_swan` is active, sell gear forced to 0.
 
 ## UI behavior
-- Auto perks are display-only with totals.
-- Manual perks use radios for exclusive groups and checkboxes otherwise.
-- Auto and manual totals show integer points only.
-- Apply/Cancel state is per-stock, not global.
+- Auto perks are display-only with totals (bold).
+- Manual perks use radios for exclusive groups and checkboxes otherwise (bold total).
+- Ratio is shown under manual total (indented).
+- Apply/Cancel status is stored per-stock and persisted in `data.csv`.
+  - Apply computes from base gears (not from prior applied values).
+  - Cancel returns to base gears.
 
 ## Data refresh pipeline
 The Refresh Market Data button does:
@@ -88,4 +90,3 @@ Stored for speed and history:
 2. Choose `auto` + `auto_trigger` or manual only.
 3. Assign `exclusive_group` if mutually exclusive.
 4. Keep points as integers for clean totals.
-
