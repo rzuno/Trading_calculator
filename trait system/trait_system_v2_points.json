@@ -1,0 +1,583 @@
+{
+  "system_config": {
+    "version": "2.0",
+    "point_to_gear_ratio": 10.0,
+    "base_buy_gear": 3.0,
+    "base_sell_gear": 3.0,
+    "gear_min": 1.0,
+    "gear_max": 5.0,
+    "description": "Point system: 10 points = 1 gear shift. Adjust ratio to control reactivity."
+  },
+  
+  "trait_categories": {
+    "volatility": {
+      "name": "Volatility",
+      "auto": true,
+      "description": "Based on ATR%, automatic detection"
+    },
+    "trend": {
+      "name": "Trend & Momentum", 
+      "auto": true,
+      "description": "Based on ROC, slope, MA position"
+    },
+    "deployment": {
+      "name": "Position Size",
+      "auto": true,
+      "description": "Based on deployed capital %"
+    },
+    "pnl": {
+      "name": "Profit & Loss",
+      "auto": true,
+      "description": "Based on current P&L %"
+    },
+    "market_regime": {
+      "name": "Global Market",
+      "auto": false,
+      "description": "Overall market condition (manual)"
+    },
+    "events": {
+      "name": "Stock Events",
+      "auto": false,
+      "description": "Company-specific catalysts (manual)"
+    },
+    "special": {
+      "name": "Special Situations",
+      "auto": false,
+      "description": "Rare conditions (manual)"
+    },
+    "conviction": {
+      "name": "Psychology & Conviction",
+      "auto": false,
+      "description": "Trader's judgment (manual)"
+    },
+    "fx": {
+      "name": "FX & Currency",
+      "auto": true,
+      "description": "Exchange rate considerations (US stocks only)"
+    }
+  },
+  
+  "traits": [
+    {
+      "id": "gentle_breeze",
+      "name": "Gentle Breeze",
+      "category": "volatility",
+      "tier": "minor",
+      "buy_points": -3,
+      "sell_points": -5,
+      "auto_trigger": "atr_pct < 1.5",
+      "description": "Ultra-calm market, tight spreads, low opportunity",
+      "icon": "🍃"
+    },
+    {
+      "id": "steady_eddie",
+      "name": "Steady Eddie",
+      "category": "volatility",
+      "tier": "minor",
+      "buy_points": 0,
+      "sell_points": 0,
+      "auto_trigger": "1.5 <= atr_pct < 3.0",
+      "description": "Normal volatility, default behavior",
+      "icon": "📊"
+    },
+    {
+      "id": "wild_mustang",
+      "name": "Wild Mustang",
+      "category": "volatility",
+      "tier": "minor",
+      "buy_points": 2,
+      "sell_points": 0,
+      "auto_trigger": "3.0 <= atr_pct < 5.0",
+      "description": "Elevated volatility, wider entries",
+      "icon": "🐎"
+    },
+    {
+      "id": "hard_shaker",
+      "name": "Hard Shaker",
+      "category": "volatility",
+      "tier": "moderate",
+      "buy_points": 5,
+      "sell_points": 3,
+      "auto_trigger": "5.0 <= atr_pct < 7.0",
+      "description": "High volatility, wide swings expected",
+      "icon": "📳"
+    },
+    {
+      "id": "crazy_dancer",
+      "name": "Crazy Dancer",
+      "category": "volatility",
+      "tier": "major",
+      "buy_points": 10,
+      "sell_points": 5,
+      "auto_trigger": "atr_pct >= 7.0",
+      "description": "Extreme volatility, max caution",
+      "icon": "💃"
+    },
+    
+    {
+      "id": "rocket_fuel",
+      "name": "Rocket Fuel",
+      "category": "trend",
+      "tier": "major",
+      "buy_points": -15,
+      "sell_points": 12,
+      "auto_trigger": "roc > 15",
+      "description": "Strong rally, ride the wave",
+      "icon": "🚀"
+    },
+    {
+      "id": "tailwind",
+      "name": "Tailwind",
+      "category": "trend",
+      "tier": "moderate",
+      "buy_points": -6,
+      "sell_points": 6,
+      "auto_trigger": "8 < roc <= 15",
+      "description": "Mild uptrend, favorable conditions",
+      "icon": "💨"
+    },
+    {
+      "id": "sideways_shuffle",
+      "name": "Sideways Shuffle",
+      "category": "trend",
+      "tier": "minor",
+      "buy_points": 0,
+      "sell_points": 0,
+      "auto_trigger": "-3 <= roc <= 3",
+      "description": "Range-bound, no clear trend",
+      "icon": "↔️"
+    },
+    {
+      "id": "headwind",
+      "name": "Headwind",
+      "category": "trend",
+      "tier": "moderate",
+      "buy_points": 6,
+      "sell_points": -6,
+      "auto_trigger": "-15 <= roc < -8",
+      "description": "Mild downtrend, cautious",
+      "icon": "🌪️"
+    },
+    {
+      "id": "falling_knife",
+      "name": "Falling Knife",
+      "category": "trend",
+      "tier": "major",
+      "buy_points": 15,
+      "sell_points": -12,
+      "auto_trigger": "roc < -15",
+      "description": "Steep drop, danger zone",
+      "icon": "🔪"
+    },
+    
+    {
+      "id": "empty_barracks",
+      "name": "Empty Barracks",
+      "category": "deployment",
+      "tier": "minor",
+      "buy_points": -3,
+      "sell_points": -4,
+      "auto_trigger": "deployed_pct < 10",
+      "description": "Almost no exposure, room to add",
+      "icon": "🏚️"
+    },
+    {
+      "id": "scout_team",
+      "name": "Scout Team",
+      "category": "deployment",
+      "tier": "minor",
+      "buy_points": 0,
+      "sell_points": 0,
+      "auto_trigger": "10 <= deployed_pct < 30",
+      "description": "Light position, normal",
+      "icon": "🔭"
+    },
+    {
+      "id": "standard_formation",
+      "name": "Standard Formation",
+      "category": "deployment",
+      "tier": "minor",
+      "buy_points": 0,
+      "sell_points": 0,
+      "auto_trigger": "30 <= deployed_pct < 60",
+      "description": "Normal deployment",
+      "icon": "⚔️"
+    },
+    {
+      "id": "heavy_artillery",
+      "name": "Heavy Artillery",
+      "category": "deployment",
+      "tier": "moderate",
+      "buy_points": 3,
+      "sell_points": -6,
+      "auto_trigger": "60 <= deployed_pct < 80",
+      "description": "Heavy position, need liquidity",
+      "icon": "🎯"
+    },
+    {
+      "id": "all_in_assault",
+      "name": "All-In Assault",
+      "category": "deployment",
+      "tier": "major",
+      "buy_points": 7,
+      "sell_points": -12,
+      "auto_trigger": "80 <= deployed_pct < 95",
+      "description": "Very heavy, must reduce",
+      "icon": "💥"
+    },
+    {
+      "id": "maxed_out",
+      "name": "Maxed Out",
+      "category": "deployment",
+      "tier": "major",
+      "buy_points": 15,
+      "sell_points": -15,
+      "auto_trigger": "deployed_pct >= 95",
+      "description": "Emergency: force exit",
+      "icon": "🚨"
+    },
+    
+    {
+      "id": "deep_underwater",
+      "name": "Deep Underwater",
+      "category": "pnl",
+      "tier": "moderate",
+      "buy_points": 4,
+      "sell_points": -5,
+      "auto_trigger": "pnl_pct < -15",
+      "description": "Heavy loss, patient averaging",
+      "icon": "🌊"
+    },
+    {
+      "id": "treading_water",
+      "name": "Treading Water",
+      "category": "pnl",
+      "tier": "minor",
+      "buy_points": 0,
+      "sell_points": 0,
+      "auto_trigger": "-5 <= pnl_pct < 5",
+      "description": "Near breakeven",
+      "icon": "🏊"
+    },
+    {
+      "id": "green_shoots",
+      "name": "Green Shoots",
+      "category": "pnl",
+      "tier": "minor",
+      "buy_points": -2,
+      "sell_points": 3,
+      "auto_trigger": "5 <= pnl_pct < 15",
+      "description": "Small profit, let it run",
+      "icon": "🌱"
+    },
+    {
+      "id": "cash_cow",
+      "name": "Cash Cow",
+      "category": "pnl",
+      "tier": "moderate",
+      "buy_points": -6,
+      "sell_points": 8,
+      "auto_trigger": "pnl_pct >= 15",
+      "description": "Big profit, harvest time",
+      "icon": "🐄"
+    },
+    
+    {
+      "id": "raging_bull",
+      "name": "Raging Bull",
+      "category": "market_regime",
+      "tier": "major",
+      "buy_points": -8,
+      "sell_points": 10,
+      "auto_trigger": null,
+      "description": "Strong bull market, aggressive",
+      "icon": "🐂"
+    },
+    {
+      "id": "quiet_bull",
+      "name": "Quiet Bull",
+      "category": "market_regime",
+      "tier": "minor",
+      "buy_points": -3,
+      "sell_points": 4,
+      "auto_trigger": null,
+      "description": "Mild bull, cautiously optimistic",
+      "icon": "📈"
+    },
+    {
+      "id": "neutral_zone",
+      "name": "Neutral Zone",
+      "category": "market_regime",
+      "tier": "minor",
+      "buy_points": 0,
+      "sell_points": 0,
+      "auto_trigger": null,
+      "description": "Unclear market direction",
+      "icon": "⚪"
+    },
+    {
+      "id": "cautious_bear",
+      "name": "Cautious Bear",
+      "category": "market_regime",
+      "tier": "minor",
+      "buy_points": 3,
+      "sell_points": -4,
+      "auto_trigger": null,
+      "description": "Mild bear, defensive stance",
+      "icon": "📉"
+    },
+    {
+      "id": "savage_bear",
+      "name": "Savage Bear",
+      "category": "market_regime",
+      "tier": "major",
+      "buy_points": 8,
+      "sell_points": -10,
+      "auto_trigger": null,
+      "description": "Panic selling, extreme caution",
+      "icon": "🐻"
+    },
+    
+    {
+      "id": "earnings_week",
+      "name": "Earnings Week",
+      "category": "events",
+      "tier": "moderate",
+      "buy_points": 5,
+      "sell_points": 5,
+      "auto_trigger": null,
+      "description": "Volatility spike expected",
+      "icon": "📊"
+    },
+    {
+      "id": "beat_street",
+      "name": "Beat Street",
+      "category": "events",
+      "tier": "major",
+      "buy_points": -8,
+      "sell_points": 12,
+      "auto_trigger": null,
+      "description": "Earnings beat, momentum surge",
+      "icon": "🎯"
+    },
+    {
+      "id": "missed_target",
+      "name": "Missed Target",
+      "category": "events",
+      "tier": "major",
+      "buy_points": 8,
+      "sell_points": -8,
+      "auto_trigger": null,
+      "description": "Earnings miss, selloff",
+      "icon": "❌"
+    },
+    {
+      "id": "product_launch",
+      "name": "Product Launch",
+      "category": "events",
+      "tier": "minor",
+      "buy_points": -3,
+      "sell_points": 5,
+      "auto_trigger": null,
+      "description": "New product catalyst",
+      "icon": "🚀"
+    },
+    {
+      "id": "analyst_upgrade",
+      "name": "Analyst Upgrade",
+      "category": "events",
+      "tier": "minor",
+      "buy_points": -3,
+      "sell_points": 4,
+      "auto_trigger": null,
+      "description": "Street turning bullish",
+      "icon": "⬆️"
+    },
+    {
+      "id": "analyst_downgrade",
+      "name": "Analyst Downgrade",
+      "category": "events",
+      "tier": "minor",
+      "buy_points": 3,
+      "sell_points": -4,
+      "auto_trigger": null,
+      "description": "Street turning bearish",
+      "icon": "⬇️"
+    },
+    
+    {
+      "id": "black_swan",
+      "name": "Black Swan",
+      "category": "special",
+      "tier": "major",
+      "buy_points": 15,
+      "sell_points": -15,
+      "auto_trigger": null,
+      "description": "Extreme crisis, safety first",
+      "icon": "🦢"
+    },
+    {
+      "id": "fomo_frenzy",
+      "name": "FOMO Frenzy",
+      "category": "special",
+      "tier": "major",
+      "buy_points": -15,
+      "sell_points": 15,
+      "auto_trigger": null,
+      "description": "Euphoria peak, take profit",
+      "icon": "🎪"
+    },
+    {
+      "id": "tax_loss_season",
+      "name": "Tax Loss Season",
+      "category": "special",
+      "tier": "minor",
+      "buy_points": 3,
+      "sell_points": -3,
+      "auto_trigger": null,
+      "description": "December selling pressure",
+      "icon": "📅"
+    },
+    {
+      "id": "fed_pivot",
+      "name": "Fed Pivot",
+      "category": "special",
+      "tier": "moderate",
+      "buy_points": -6,
+      "sell_points": 7,
+      "auto_trigger": null,
+      "description": "Rate cuts, liquidity boost",
+      "icon": "💰"
+    },
+    {
+      "id": "fed_hammer",
+      "name": "Fed Hammer",
+      "category": "special",
+      "tier": "moderate",
+      "buy_points": 6,
+      "sell_points": -5,
+      "auto_trigger": null,
+      "description": "Rate hikes, liquidity drain",
+      "icon": "🔨"
+    },
+    
+    {
+      "id": "high_conviction",
+      "name": "High Conviction",
+      "category": "conviction",
+      "tier": "moderate",
+      "buy_points": -7,
+      "sell_points": 7,
+      "auto_trigger": null,
+      "description": "Strong thesis, aggressive",
+      "icon": "💪"
+    },
+    {
+      "id": "low_conviction",
+      "name": "Low Conviction",
+      "category": "conviction",
+      "tier": "moderate",
+      "buy_points": 7,
+      "sell_points": -7,
+      "auto_trigger": null,
+      "description": "Uncertain, defensive",
+      "icon": "🤷"
+    },
+    {
+      "id": "diamond_hands",
+      "name": "Diamond Hands",
+      "category": "conviction",
+      "tier": "minor",
+      "buy_points": 0,
+      "sell_points": -5,
+      "auto_trigger": null,
+      "description": "Strong hold, resist sells",
+      "icon": "💎"
+    },
+    {
+      "id": "paper_hands",
+      "name": "Paper Hands",
+      "category": "conviction",
+      "tier": "minor",
+      "buy_points": 0,
+      "sell_points": 5,
+      "auto_trigger": null,
+      "description": "Quick exit preferred",
+      "icon": "📄"
+    },
+    {
+      "id": "battle_weary",
+      "name": "Battle Weary",
+      "category": "conviction",
+      "tier": "minor",
+      "buy_points": 3,
+      "sell_points": 3,
+      "auto_trigger": null,
+      "description": "Tired after many rescues",
+      "icon": "😰"
+    },
+    
+    {
+      "id": "fx_green_light",
+      "name": "FX Green Light",
+      "category": "fx",
+      "tier": "moderate",
+      "buy_points": -5,
+      "sell_points": 0,
+      "auto_trigger": "fx_current < fx_avg * 0.98",
+      "description": "USD cheap, buy opportunity (US stocks)",
+      "icon": "🟢"
+    },
+    {
+      "id": "fx_yellow_light",
+      "name": "FX Yellow Light",
+      "category": "fx",
+      "tier": "minor",
+      "buy_points": 0,
+      "sell_points": 0,
+      "auto_trigger": "fx_avg * 0.98 <= fx_current <= fx_avg * 1.02",
+      "description": "FX neutral zone (US stocks)",
+      "icon": "🟡"
+    },
+    {
+      "id": "fx_red_light",
+      "name": "FX Red Light",
+      "category": "fx",
+      "tier": "moderate",
+      "buy_points": 0,
+      "sell_points": 6,
+      "auto_trigger": "fx_current > fx_avg * 1.02",
+      "description": "USD expensive, sell profit (US stocks)",
+      "icon": "🔴"
+    },
+    {
+      "id": "fx_premium_zone",
+      "name": "FX Premium Zone",
+      "category": "fx",
+      "tier": "major",
+      "buy_points": 3,
+      "sell_points": 10,
+      "auto_trigger": "fx_current > fx_avg * 1.05",
+      "description": "Strong dollar, strong sell signal (US stocks)",
+      "icon": "💵"
+    }
+  ],
+  
+  "tier_guide": {
+    "minor": {
+      "range": "±1 to ±5 points",
+      "description": "Subtle adjustments, fine-tuning",
+      "examples": ["Gentle Breeze", "Scout Team", "Green Shoots"]
+    },
+    "moderate": {
+      "range": "±5 to ±8 points",
+      "description": "Noticeable impact, standard signals",
+      "examples": ["Hard Shaker", "Tailwind", "Heavy Artillery"]
+    },
+    "major": {
+      "range": "±8 to ±15 points",
+      "description": "Strong impact, extreme conditions",
+      "examples": ["Rocket Fuel", "Black Swan", "Maxed Out"]
+    }
+  }
+}
