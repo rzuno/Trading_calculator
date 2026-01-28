@@ -20,31 +20,33 @@ except ImportError:
     YFINANCE_AVAILABLE = False
     print("Warning: yfinance not installed. Price fetching disabled.")
 
-TRAIT_CONFIG_PATH = os.path.join("trait system", "trait_system_v2_points.json")
+TRAIT_CONFIG_PATH = os.path.join("trait system", "perks.json")
 TRAIT_CONFIG = None
 TRAIT_SYSTEM = {}
-TRAIT_CATEGORIES = {}
+EXCLUSIVE_GROUPS = {}
 TRAITS = []
 AUTO_TRAITS = []
 MANUAL_TRAITS = []
 perk_font = None
 perk_check_style = None
+perk_radio_style = None
 
 
 def load_trait_config():
-    global TRAIT_CONFIG, TRAIT_SYSTEM, TRAIT_CATEGORIES, TRAITS, AUTO_TRAITS, MANUAL_TRAITS
+    global TRAIT_CONFIG, TRAIT_SYSTEM, EXCLUSIVE_GROUPS, TRAITS, AUTO_TRAITS, MANUAL_TRAITS
+    if not os.path.exists(TRAIT_CONFIG_PATH):
+        raise FileNotFoundError(f"Missing perk config: {TRAIT_CONFIG_PATH}")
     with open(TRAIT_CONFIG_PATH, "r", encoding="utf-8") as f:
         TRAIT_CONFIG = json.load(f)
     TRAIT_SYSTEM = TRAIT_CONFIG.get("system_config", {})
-    TRAIT_CATEGORIES = TRAIT_CONFIG.get("trait_categories", {})
-    TRAITS = TRAIT_CONFIG.get("traits", [])
+    EXCLUSIVE_GROUPS = TRAIT_CONFIG.get("exclusive_groups", {})
+    TRAITS = TRAIT_CONFIG.get("traits") or TRAIT_CONFIG.get("perks", [])
     AUTO_TRAITS = []
     MANUAL_TRAITS = []
     for trait in TRAITS:
-        category = trait.get("category")
-        category_auto = TRAIT_CATEGORIES.get(category, {}).get("auto", True)
+        auto_flag = bool(trait.get("auto", False))
         auto_trigger = trait.get("auto_trigger")
-        if category_auto and auto_trigger:
+        if auto_flag and auto_trigger:
             AUTO_TRAITS.append(trait)
         else:
             MANUAL_TRAITS.append(trait)
@@ -61,6 +63,8 @@ DEFAULT_NAMES = [
     ("Alphabet", "US"),
 ]
 GLOBAL_FX_RATE = 1300.0  # ₩ per $
+GLOBAL_FX_AVG_RATE = GLOBAL_FX_RATE
+FX_AVG_DAYS = 20
 PORTFOLIO_N = 25  # Total units across all stocks
 LOAD_REF_DAYS = 5
 HIGH_CONTEXT_DAYS = 10
@@ -141,6 +145,12 @@ def default_record(market="KR"):
         "low_today": "",  # Today's low
         "high_today": "",  # Today's high
         "last_update": "",  # Timestamp of last price fetch
+        "roc_1d": 0.0,
+        "roc_3d": 0.0,
+        "roc_5d": 0.0,
+        "atr_3d_pct": 0.0,
+        "atr_5d_pct": 0.0,
+        "fx_avg": GLOBAL_FX_AVG_RATE,
         "manual_sell_mode": 0,  # 0=auto, 1=manual
         "manual_sell_step": 0.0,  # Manual override value if enabled
         "manual_load_mode": 0,  # 0=auto, 1=manual
@@ -154,7 +164,7 @@ def default_record(market="KR"):
 
 
 def load_data():
-    global stock_order, stock_data, GLOBAL_FX_RATE, GLOBAL_MAX_VOLUME_KRW
+    global stock_order, stock_data, GLOBAL_FX_RATE, GLOBAL_FX_AVG_RATE, GLOBAL_MAX_VOLUME_KRW
     stock_data = {}
     stock_order = []
     GLOBAL_MAX_VOLUME_KRW = 0.0
@@ -231,6 +241,12 @@ def load_data():
                 high_10d = to_float(row.get("high_10d", ""))
                 low_today = to_float(row.get("low_today", ""))
                 high_today = to_float(row.get("high_today", ""))
+                roc_1d = to_float(row.get("roc_1d", 0.0))
+                roc_3d = to_float(row.get("roc_3d", 0.0))
+                roc_5d = to_float(row.get("roc_5d", 0.0))
+                atr_3d_pct = to_float(row.get("atr_3d_pct", 0.0))
+                atr_5d_pct = to_float(row.get("atr_5d_pct", 0.0))
+                fx_avg = to_float(row.get("fx_avg", GLOBAL_FX_AVG_RATE))
                 last_update = (row.get("last_update") or "").strip()
                 manual_sell_mode = int(row.get("manual_sell_mode", 0)) if str(row.get("manual_sell_mode", "0")).isdigit() else 0
                 manual_sell_step = to_float(row.get("manual_sell_step", 0.0))
@@ -266,6 +282,12 @@ def load_data():
                     "high_10d": high_10d,
                     "low_today": low_today,
                     "high_today": high_today,
+                    "roc_1d": roc_1d if roc_1d != "" else 0.0,
+                    "roc_3d": roc_3d if roc_3d != "" else 0.0,
+                    "roc_5d": roc_5d if roc_5d != "" else 0.0,
+                    "atr_3d_pct": atr_3d_pct if atr_3d_pct != "" else 0.0,
+                    "atr_5d_pct": atr_5d_pct if atr_5d_pct != "" else 0.0,
+                    "fx_avg": fx_avg if fx_avg != "" else GLOBAL_FX_AVG_RATE,
                     "last_update": last_update,
                     "manual_sell_mode": manual_sell_mode,
                     "manual_sell_step": manual_sell_step,
@@ -281,6 +303,8 @@ def load_data():
                 # Allow FX to be set from any row if a realistic value is present (>10 avoids overwriting with 1)
                 if fx_rate and fx_rate > 10:
                     GLOBAL_FX_RATE = fx_rate
+                if fx_avg and fx_avg > 10:
+                    GLOBAL_FX_AVG_RATE = fx_avg
                 if max_volume and max_volume > 0:
                     GLOBAL_MAX_VOLUME_KRW = max_volume
     if not stock_order:
@@ -289,8 +313,11 @@ def load_data():
             stock_data[nm] = default_record(mk)
 
     # After loading, propagate global FX to all records
+    if not GLOBAL_FX_AVG_RATE or GLOBAL_FX_AVG_RATE <= 0:
+        GLOBAL_FX_AVG_RATE = GLOBAL_FX_RATE
     for rec in stock_data.values():
         rec["fx_rate"] = GLOBAL_FX_RATE
+        rec["fx_avg"] = GLOBAL_FX_AVG_RATE
 
 
 def write_data_file():
@@ -317,6 +344,12 @@ def write_data_file():
         "high_10d",
         "low_today",
         "high_today",
+        "roc_1d",
+        "roc_3d",
+        "roc_5d",
+        "atr_3d_pct",
+        "atr_5d_pct",
+        "fx_avg",
         "last_update",
         "manual_sell_mode",
         "manual_sell_step",
@@ -357,6 +390,12 @@ def write_data_file():
                     "high_10d": rec.get("high_10d", ""),
                     "low_today": rec.get("low_today", ""),
                     "high_today": rec.get("high_today", ""),
+                    "roc_1d": rec.get("roc_1d", 0.0),
+                    "roc_3d": rec.get("roc_3d", 0.0),
+                    "roc_5d": rec.get("roc_5d", 0.0),
+                    "atr_3d_pct": rec.get("atr_3d_pct", 0.0),
+                    "atr_5d_pct": rec.get("atr_5d_pct", 0.0),
+                    "fx_avg": rec.get("fx_avg", GLOBAL_FX_AVG_RATE),
                     "last_update": rec.get("last_update", ""),
                     "manual_sell_mode": rec.get("manual_sell_mode", 0),
                     "manual_sell_step": rec.get("manual_sell_step", 0.0),
@@ -392,6 +431,26 @@ def fmt_compact(val):
         return text.rstrip("0").rstrip(".")
     except (TypeError, ValueError):
         return ""
+
+
+def fmt_points(val):
+    try:
+        val = float(val)
+    except (TypeError, ValueError):
+        return "0"
+    if abs(val - round(val)) < 1e-6:
+        return f"{int(round(val)):+d}"
+    return f"{val:+.1f}"
+
+
+def fmt_ratio(val):
+    try:
+        ratio = float(val)
+    except (TypeError, ValueError):
+        return "0:1"
+    if abs(ratio - round(ratio)) < 1e-6:
+        return f"{int(round(ratio))}:1"
+    return f"{ratio:.1f}:1"
 
 
 def compute_unit_size_krw(max_volume_krw):
@@ -472,6 +531,11 @@ def compute_trait_metrics(parsed, data):
     high_5d = float(data.get("high_5d", 0) or 0)
     high_10d = float(data.get("high_10d", 0) or 0)
     low_today = float(data.get("low_today", 0) or 0)
+    roc_1d = float(data.get("roc_1d", 0) or 0)
+    roc_3d = float(data.get("roc_3d", 0) or 0)
+    roc_5d = float(data.get("roc_5d", 0) or 0)
+    atr_3d_pct = float(data.get("atr_3d_pct", 0) or 0)
+    atr_5d_pct = float(data.get("atr_5d_pct", 0) or 0)
     avg_cost = float(parsed.get("avg_cost", 0) or 0)
     if float(parsed.get("num_shares", 0) or 0) <= 0:
         avg_cost = 0.0
@@ -482,19 +546,27 @@ def compute_trait_metrics(parsed, data):
     deployed_pct = float(data.get("total_u", 0) or 0) * 100.0
     pnl_pct = ((current - avg_cost) / avg_cost * 100) if avg_cost > 0 and current > 0 else 0.0
     fx_current = float(parsed.get("fx_rate", 0) or 0)
-    fx_avg = fx_current
+    fx_avg = float(GLOBAL_FX_AVG_RATE or fx_current)
+    fx_vs_avg = ((fx_current - fx_avg) / fx_avg * 100) if fx_avg > 0 else 0.0
     is_us_stock = parsed.get("market") == "US"
     idle_days = trading_days_since(parsed.get("latest_trading_day", ""))
 
     return {
         "atr_pct": atr_pct,
         "roc": roc,
+        "roc_1d": roc_1d,
+        "roc_3d": roc_3d,
+        "roc_5d": roc_5d,
+        "atr_3d_pct": atr_3d_pct,
+        "atr_5d_pct": atr_5d_pct,
         "deployed_pct": deployed_pct,
         "pnl_pct": pnl_pct,
         "fx_current": fx_current,
         "fx_avg": fx_avg,
+        "fx_vs_avg": fx_vs_avg,
         "is_us_stock": is_us_stock,
         "idle_days": idle_days,
+        "days_idle": idle_days,
     }
 
 
@@ -502,6 +574,8 @@ def evaluate_traits(metrics, manual_states):
     active_auto = []
     active_manual = []
     for trait in AUTO_TRAITS:
+        if not metrics.get("is_us_stock") and (trait.get("exclusive_group") == "fx" or trait.get("category") == "fx"):
+            continue
         if safe_eval(trait.get("auto_trigger"), metrics):
             active_auto.append(trait)
     for trait in MANUAL_TRAITS:
@@ -514,6 +588,16 @@ def compute_perk_gears(metrics, manual_states):
     buy_points = 0.0
     sell_points = 0.0
     active_auto, active_manual = evaluate_traits(metrics, manual_states)
+    filtered_auto = []
+    seen_groups = set()
+    for trait in active_auto:
+        group = trait.get("exclusive_group")
+        if group and group in seen_groups:
+            continue
+        if group:
+            seen_groups.add(group)
+        filtered_auto.append(trait)
+    active_auto = filtered_auto
     active = active_auto + active_manual
     for trait in active:
         buy_points += trait.get("buy_points", 0)
@@ -707,29 +791,130 @@ def fetch_current_price(stock_name):
     try:
         stock = yf.Ticker(ticker)
 
-        # Get recent history for highs (exclude today when possible)
-        hist_days = HIGH_CONTEXT_DAYS + 1
-        hist = stock.history(period=f"{hist_days}d")
+        # Get recent history for highs and indicators
+        hist_days = HIGH_CONTEXT_DAYS + 5
+        hist = stock.history(period=f"{hist_days}d", interval="1d", prepost=True)
         if hist.empty:
             return None
+
+        def compute_roc(close_series, periods):
+            if close_series is None or len(close_series) <= periods:
+                return 0.0
+            current = float(close_series.iloc[-1])
+            past = float(close_series.iloc[-1 - periods])
+            if past == 0:
+                return 0.0
+            return (current - past) / past * 100.0
+
+        def compute_atr_pct(hist_frame, periods):
+            if hist_frame is None or hist_frame.empty:
+                return 0.0
+            highs = hist_frame["High"]
+            lows = hist_frame["Low"]
+            closes = hist_frame["Close"]
+            prev_close = closes.shift(1)
+            tr = (highs - lows).to_frame("hl")
+            tr["hc"] = (highs - prev_close).abs()
+            tr["lc"] = (lows - prev_close).abs()
+            tr_val = tr.max(axis=1).dropna()
+            if len(tr_val) < periods:
+                return 0.0
+            atr = float(tr_val.tail(periods).mean())
+            last_close = float(closes.iloc[-1]) if len(closes) else 0.0
+            return (atr / last_close * 100.0) if last_close > 0 else 0.0
+
+        def as_float(value):
+            try:
+                if hasattr(value, "size") and value.size == 1 and hasattr(value, "item"):
+                    return float(value.item())
+            except Exception:
+                pass
+            try:
+                if hasattr(value, "iloc"):
+                    return float(value.iloc[0])
+            except Exception:
+                pass
+            return float(value)
 
         hist_completed = hist.iloc[:-1] if len(hist) > 1 else hist
         if hist_completed.empty:
             hist_completed = hist
         high_10d = hist["High"].tail(HIGH_CONTEXT_DAYS).max()
         high_5d = hist_completed["High"].tail(LOAD_REF_DAYS).max()
+        atr_3d_pct = compute_atr_pct(hist, 3)
+        atr_5d_pct = compute_atr_pct(hist, 5)
 
-        # Get today's data
-        today = stock.history(period="1d")
-        if today.empty:
-            return None
+        current = None
+        low_today = None
+        high_today = None
+
+        intraday = yf.download(
+            ticker,
+            period="1d",
+            interval="1m",
+            prepost=True,
+            progress=False,
+            auto_adjust=False,
+        )
+        if not intraday.empty:
+            current = as_float(intraday["Close"].iloc[-1])
+            low_today = as_float(intraday["Low"].min())
+            high_today = as_float(intraday["High"].max())
+
+        if current is None:
+            intraday_5m = yf.download(
+                ticker,
+                period="5d",
+                interval="5m",
+                prepost=True,
+                progress=False,
+                auto_adjust=False,
+            )
+            if not intraday_5m.empty:
+                current = as_float(intraday_5m["Close"].iloc[-1])
+                low_today = as_float(intraday_5m["Low"].iloc[-1])
+                high_today = as_float(intraday_5m["High"].iloc[-1])
+
+        if current is None:
+            try:
+                fast = stock.fast_info
+                if fast:
+                    current = fast.get("last_price") or fast.get("regular_market_price")
+                    low_today = fast.get("day_low")
+                    high_today = fast.get("day_high")
+            except Exception:
+                pass
+
+        if current is None:
+            current = float(hist["Close"].iloc[-1])
+
+        if low_today is None:
+            low_today = as_float(hist["Low"].iloc[-1])
+        if high_today is None:
+            high_today = as_float(hist["High"].iloc[-1])
+
+        close_series = hist["Close"].copy()
+        if not close_series.empty and current:
+            close_series.iloc[-1] = float(current)
+
+        roc_1d = 0.0
+        if len(close_series) >= 2:
+            prev_close = float(close_series.iloc[-2])
+            roc_1d = ((float(current) - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
+        roc_3d = compute_roc(close_series, 3)
+        roc_5d = compute_roc(close_series, 5)
 
         return {
-            'current': today['Close'].iloc[-1],
+            'current': float(current),
             'high_5d': high_5d,
             'high_10d': high_10d,
-            'low_today': today['Low'].iloc[-1],
-            'high_today': today['High'].iloc[-1],
+            'low_today': float(low_today),
+            'high_today': float(high_today),
+            'roc_1d': roc_1d,
+            'roc_3d': roc_3d,
+            'roc_5d': roc_5d,
+            'atr_3d_pct': atr_3d_pct,
+            'atr_5d_pct': atr_5d_pct,
             'timestamp': datetime.now()
         }
     except Exception as e:
@@ -741,16 +926,25 @@ def fetch_fx_rate():
     """
     Fetch USD/KRW exchange rate from Yahoo Finance.
 
-    Returns: float or None
+    Returns: dict with keys: current, avg (or None on failure)
     """
     if not YFINANCE_AVAILABLE:
         return None
 
     try:
         fx = yf.Ticker("KRW=X")
-        hist = fx.history(period="1d")
-        if not hist.empty:
-            return hist['Close'].iloc[-1]
+        hist = fx.history(period="30d", interval="1d", prepost=True)
+        if hist.empty:
+            return None
+        current = None
+        intraday = fx.history(period="1d", interval="1m", prepost=True)
+        if not intraday.empty:
+            current = float(intraday["Close"].iloc[-1])
+        if current is None:
+            current = float(hist["Close"].iloc[-1])
+        avg_series = hist["Close"].tail(FX_AVG_DAYS) if len(hist) >= FX_AVG_DAYS else hist["Close"]
+        avg = float(avg_series.mean()) if not avg_series.empty else float(current)
+        return {"current": float(current), "avg": avg}
     except Exception as e:
         print(f"Error fetching FX rate: {e}")
     return None
@@ -760,14 +954,17 @@ def fetch_fx_rate():
 
 
 def refresh_market_data():
-    global GLOBAL_FX_RATE
+    global GLOBAL_FX_RATE, GLOBAL_FX_AVG_RATE
     if not YFINANCE_AVAILABLE:
         messagebox.showerror("Unavailable", "yfinance is not installed. Price fetching disabled.")
         return
 
+    current_name = get_current_stock_name()
+
     new_fx = fetch_fx_rate()
-    if new_fx and new_fx > 10:
-        GLOBAL_FX_RATE = new_fx
+    if new_fx and new_fx.get("current", 0) > 10:
+        GLOBAL_FX_RATE = new_fx["current"]
+        GLOBAL_FX_AVG_RATE = new_fx.get("avg", GLOBAL_FX_RATE)
         fx_rate_var.set(format_input(GLOBAL_FX_RATE, "KR", decimals=2))
 
     for stock_name in stock_order:
@@ -780,12 +977,22 @@ def refresh_market_data():
         rec["high_10d"] = price_data["high_10d"]
         rec["low_today"] = price_data["low_today"]
         rec["high_today"] = price_data["high_today"]
+        rec["roc_1d"] = price_data.get("roc_1d", 0.0)
+        rec["roc_3d"] = price_data.get("roc_3d", 0.0)
+        rec["roc_5d"] = price_data.get("roc_5d", 0.0)
+        rec["atr_3d_pct"] = price_data.get("atr_3d_pct", 0.0)
+        rec["atr_5d_pct"] = price_data.get("atr_5d_pct", 0.0)
         rec["last_update"] = price_data["timestamp"].strftime("%Y-%m-%d %H:%M")
         rec["fx_rate"] = GLOBAL_FX_RATE
+        rec["fx_avg"] = GLOBAL_FX_AVG_RATE
         stock_data[stock_name] = rec
 
     write_data_file()
-    update_display()
+    load_data()
+    if current_name:
+        refresh_name_list(selected=current_name)
+    else:
+        refresh_name_list()
     messagebox.showinfo("Market data", "Prices and FX updated.")
 
 
@@ -875,8 +1082,15 @@ def compute_state(parsed, rec, current_name):
         high_10d = float(rec.get("high_10d", 0) or 0)
         low_today = float(rec.get("low_today", 0) or 0)
         high_today = float(rec.get("high_today", 0) or 0)
+        roc_1d = float(rec.get("roc_1d", 0) or 0)
+        roc_3d = float(rec.get("roc_3d", 0) or 0)
+        roc_5d = float(rec.get("roc_5d", 0) or 0)
+        atr_3d_pct = float(rec.get("atr_3d_pct", 0) or 0)
+        atr_5d_pct = float(rec.get("atr_5d_pct", 0) or 0)
     except (TypeError, ValueError):
         current_price = high_5d = high_10d = low_today = high_today = 0.0
+        roc_1d = roc_3d = roc_5d = 0.0
+        atr_3d_pct = atr_5d_pct = 0.0
     last_update = rec.get("last_update", "")
 
     buy_mode = "LOAD" if num_shares <= 0 else "RELOAD"
@@ -977,6 +1191,11 @@ def compute_state(parsed, rec, current_name):
         "current_price": current_price,
         "low_today": low_today,
         "high_today": high_today,
+        "roc_1d": roc_1d,
+        "roc_3d": roc_3d,
+        "roc_5d": roc_5d,
+        "atr_3d_pct": atr_3d_pct,
+        "atr_5d_pct": atr_5d_pct,
         "last_update": last_update,
         "rescue_trigger": rescue_trigger,
         "rescue_qty": rescue_qty,
@@ -1040,6 +1259,25 @@ def format_recommendation_text(rec, current_buy_gear, current_sell_gear):
             f"Notes: {rec.get('notes', '')}",
         ]
     )
+
+
+def get_current_stock_name():
+    return name_var.get().strip() or name_choice_var.get()
+
+
+def get_rec_state(stock_name):
+    if stock_name not in rec_states:
+        rec_states[stock_name] = {"previous_gears": None, "rec_locked": False, "latest": None}
+    return rec_states[stock_name]
+
+
+def sync_apply_button(state):
+    if not apply_btn:
+        return
+    if state.get("rec_locked") and state.get("previous_gears"):
+        apply_btn.config(text="Applied ✓", bg="#2e7d32", activebackground="#1b5e20")
+    else:
+        apply_btn.config(text="Apply", bg="#c62828", activebackground="#b71c1c")
 
 
 def parse_form_inputs():
@@ -1375,17 +1613,40 @@ def update_display(force_recommendation=False):
 
     metrics = compute_trait_metrics(parsed, data)
     manual_states = {trait_id: bool(var.get()) for trait_id, var in manual_trait_vars.items()}
-    if (not rec_locked) or force_recommendation:
+    for group_var in manual_group_vars.values():
+        selected = group_var.get()
+        if selected:
+            manual_states[selected] = True
+
+    state = get_rec_state(current_name)
+    perk = state.get("latest")
+    recompute = (not state.get("rec_locked")) or force_recommendation or perk is None
+    if recompute:
         perk = compute_perk_gears(metrics, manual_states)
-        global latest_recommendation
-        latest_recommendation = perk
-        recommendation_warning_var.set(f"Ratio: {perk['ratio']:.1f} pts/gear")
+        state["latest"] = perk
+
+    if perk:
+        recommendation_warning_var.set(f"Ratio: {fmt_ratio(perk['ratio'])}")
+
+        auto_buy = sum(trait.get("buy_points", 0) for trait in perk["active_auto"])
+        auto_sell = sum(trait.get("sell_points", 0) for trait in perk["active_auto"])
+        manual_buy = sum(trait.get("buy_points", 0) for trait in perk["active_manual"])
+        manual_sell = sum(trait.get("sell_points", 0) for trait in perk["active_manual"])
+        auto_points_var.set(
+            f"Auto total: buy {fmt_points(auto_buy)} / sell {fmt_points(auto_sell)}"
+        )
+        manual_points_var.set(
+            f"Manual total: buy {fmt_points(manual_buy)} / sell {fmt_points(manual_sell)}"
+        )
 
         auto_lines = []
         for trait in perk["active_auto"]:
             icon = trait.get("icon", "") or ""
             desc = trait.get("description", "") or ""
-            line = f"- {icon} {trait['name']} ({trait.get('buy_points',0):+}/{trait.get('sell_points',0):+})"
+            line = (
+                f"- {icon} {trait['name']} "
+                f"({fmt_points(trait.get('buy_points', 0))}/{fmt_points(trait.get('sell_points', 0))})"
+            )
             if desc:
                 line = f"{line} - {desc}"
             auto_lines.append(line.strip())
@@ -1397,14 +1658,23 @@ def update_display(force_recommendation=False):
         auto_traits_text.config(state="disabled")
 
         summary_lines = [
-            f"Buy points: {perk['buy_points']:+.1f} -> shift {perk['buy_shift']:+.2f}",
-            f"Sell points: {perk['sell_points']:+.1f} -> shift {perk['sell_shift']:+.2f}",
+            f"Buy points: {fmt_points(perk['buy_points'])} -> shift {perk['buy_shift']:+.1f}",
+            f"Sell points: {fmt_points(perk['sell_points'])} -> shift {perk['sell_shift']:+.1f}",
             f"Base gears: {perk['base_buy']:.1f} / {perk['base_sell']:.1f}",
-            f"Final gears: {perk['buy_gear']:.2f} / {perk['sell_gear']:.2f}",
+            f"Final gears: {perk['buy_gear']:.1f} / {perk['sell_gear']:.1f}",
         ]
-        if manual_states.get("black_swan"):
+        if any(trait.get("id") == "black_swan" for trait in perk["active_manual"]):
             summary_lines.append("Black Swan active: sell gear forced to 0.0")
         recommendation_var.set("\n".join(summary_lines))
+    else:
+        auto_points_var.set("Auto total: buy +0 / sell +0")
+        manual_points_var.set("Manual total: buy +0 / sell +0")
+        auto_traits_text.config(state="normal")
+        auto_traits_text.delete("1.0", tk.END)
+        auto_traits_text.insert("1.0", "(none)")
+        auto_traits_text.config(state="disabled")
+
+    sync_apply_button(state)
 
     plot_levels(
         name=current_name,
@@ -1437,52 +1707,69 @@ def on_show():
 
 
 def apply_recommendation():
-    global previous_gears, rec_locked
-    if not latest_recommendation:
+    stock_name = get_current_stock_name()
+    if not stock_name:
+        messagebox.showinfo("Recommendation", "No stock selected.")
+        return
+    state = get_rec_state(stock_name)
+    perk = state.get("latest")
+    if not perk:
         messagebox.showinfo("Recommendation", "No recommendation available.")
         return
-    if previous_gears:
+    if state.get("previous_gears"):
         messagebox.showinfo("Recommendation", "Change is already applied. Use Cancel to revert.")
         return
-    previous_gears = (buy_gear_var.get(), sell_gear_var.get())
-    target_buy = float(latest_recommendation.get("buy_gear", buy_gear_var.get()))
-    target_sell = float(latest_recommendation.get("sell_gear", sell_gear_var.get()))
+    state["previous_gears"] = (buy_gear_var.get(), sell_gear_var.get())
+    target_buy = float(perk.get("buy_gear", buy_gear_var.get()))
+    target_sell = float(perk.get("sell_gear", sell_gear_var.get()))
     if abs(target_buy - float(buy_gear_var.get())) < 1e-6 and abs(target_sell - float(sell_gear_var.get())) < 1e-6:
         messagebox.showinfo("Recommendation", "Recommendation not applied (no change).")
-        previous_gears = None
+        state["previous_gears"] = None
         return
     buy_gear_var.set(target_buy)
     sell_gear_var.set(target_sell)
-    rec_locked = True
+    state["rec_locked"] = True
     update_display()
-    if apply_btn:
-        apply_btn.config(text="Applied ✓", bg="#2e7d32", activebackground="#1b5e20")
+    sync_apply_button(state)
     messagebox.showinfo("Recommendation", "Change is applied.")
 
 
 def cancel_recommendation():
-    global previous_gears, rec_locked
-    if not previous_gears:
+    stock_name = get_current_stock_name()
+    if not stock_name:
+        messagebox.showinfo("Recommendation", "No stock selected.")
+        return
+    state = get_rec_state(stock_name)
+    if not state.get("previous_gears"):
         messagebox.showinfo("Recommendation", "No previous gear setting to restore.")
         return
-    buy_gear_var.set(previous_gears[0])
-    sell_gear_var.set(previous_gears[1])
-    previous_gears = None
-    rec_locked = False
+    buy_gear_var.set(state["previous_gears"][0])
+    sell_gear_var.set(state["previous_gears"][1])
+    state["previous_gears"] = None
+    state["rec_locked"] = False
     update_display(force_recommendation=True)
-    if apply_btn:
-        apply_btn.config(text="Apply", bg="#c62828", activebackground="#b71c1c")
+    sync_apply_button(state)
 
 
 def toggle_apply():
-    if rec_locked:
+    stock_name = get_current_stock_name()
+    if not stock_name:
+        messagebox.showinfo("Recommendation", "No stock selected.")
+        return
+    state = get_rec_state(stock_name)
+    if state.get("rec_locked"):
         cancel_recommendation()
     else:
         apply_recommendation()
 
 
 def refresh_recommendation():
-    if previous_gears:
+    stock_name = get_current_stock_name()
+    if not stock_name:
+        messagebox.showinfo("Recommendation", "No stock selected.")
+        return
+    state = get_rec_state(stock_name)
+    if state.get("previous_gears"):
         messagebox.showinfo("Recommendation", "Cancel first to unlock refresh.")
         return
     update_display(force_recommendation=True)
@@ -1716,12 +2003,15 @@ root = tk.Tk()
 root.title("AI Seesaw Trading Calculator")
 try:
     if "Segoe UI Emoji" in tkfont.families(root):
-        perk_font = tkfont.Font(root=root, family="Segoe UI Emoji", size=9)
+        perk_font = tkfont.Font(root=root, family="Segoe UI Emoji", size=12)
         perk_check_style = "Perk.TCheckbutton"
+        perk_radio_style = "Perk.TRadiobutton"
         ttk.Style(root).configure(perk_check_style, font=perk_font)
+        ttk.Style(root).configure(perk_radio_style, font=perk_font)
 except tk.TclError:
     perk_font = None
     perk_check_style = None
+    perk_radio_style = None
 
 main = ttk.Frame(root, padding=12)
 main.grid(sticky="nsew")
@@ -1748,11 +2038,12 @@ result_var = tk.StringVar()
 buy_info_var = tk.StringVar()
 sell_info_var = tk.StringVar()
 recommendation_var = tk.StringVar()
-latest_recommendation = None
-previous_gears = None
-rec_locked = False
 recommendation_warning_var = tk.StringVar()
+auto_points_var = tk.StringVar()
+manual_points_var = tk.StringVar()
 manual_trait_vars = {}
+manual_group_vars = {}
+rec_states = {}
 apply_btn = None
 
 form = ttk.Frame(main)
@@ -1905,18 +2196,22 @@ recommend.grid(row=0, column=2, sticky="n", padx=(12, 0))
 recommend.columnconfigure(0, weight=1)
 
 ttk.Label(recommend, text="Auto Traits").grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
-auto_traits_kwargs = {"width": 30, "height": 8, "wrap": "word"}
+auto_traits_kwargs = {"width": 38, "height": 12, "wrap": "word"}
 if perk_font:
     auto_traits_kwargs["font"] = perk_font
 auto_traits_text = tk.Text(recommend, **auto_traits_kwargs)
 auto_traits_text.grid(row=1, column=0, sticky="ew", padx=6)
 auto_traits_text.config(state="disabled")
 
-ttk.Label(recommend, text="Manual Traits").grid(row=2, column=0, sticky="w", padx=6, pady=(6, 2))
+ttk.Label(recommend, textvariable=auto_points_var, justify="left").grid(
+    row=2, column=0, sticky="w", padx=6, pady=(0, 2)
+)
+
+ttk.Label(recommend, text="Manual Traits").grid(row=3, column=0, sticky="w", padx=6, pady=(6, 2))
 manual_canvas = tk.Canvas(recommend, height=200)
-manual_canvas.grid(row=3, column=0, sticky="ew", padx=6)
+manual_canvas.grid(row=4, column=0, sticky="ew", padx=6)
 manual_scroll = ttk.Scrollbar(recommend, orient="vertical", command=manual_canvas.yview)
-manual_scroll.grid(row=3, column=1, sticky="ns")
+manual_scroll.grid(row=4, column=1, sticky="ns")
 manual_canvas.configure(yscrollcommand=manual_scroll.set)
 manual_frame = ttk.Frame(manual_canvas)
 manual_canvas.create_window((0, 0), window=manual_frame, anchor="nw")
@@ -1926,34 +2221,96 @@ def _manual_scroll_region(event):
 
 manual_frame.bind("<Configure>", _manual_scroll_region)
 
+def _manual_on_mousewheel(event):
+    manual_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+def _bind_manual_mousewheel(_):
+    manual_canvas.bind_all("<MouseWheel>", _manual_on_mousewheel)
+
+def _unbind_manual_mousewheel(_):
+    manual_canvas.unbind_all("<MouseWheel>")
+
+manual_canvas.bind("<Enter>", _bind_manual_mousewheel)
+manual_canvas.bind("<Leave>", _unbind_manual_mousewheel)
+
+manual_exclusive = {}
+manual_nonexclusive = []
 for trait in MANUAL_TRAITS:
-    icon = trait.get("icon", "") or ""
-    desc = trait.get("description", "") or ""
-    label = f"{icon} {trait['name']} ({trait.get('buy_points',0):+}/{trait.get('sell_points',0):+})"
-    if desc:
-        label = f"{label} - {desc}"
-    var = tk.IntVar(value=0)
-    manual_trait_vars[trait["id"]] = var
-    check_kwargs = {
-        "text": label,
-        "variable": var,
-        "command": update_display,
-    }
-    if perk_check_style:
-        check_kwargs["style"] = perk_check_style
-    ttk.Checkbutton(manual_frame, **check_kwargs).pack(anchor="w")
+    group = trait.get("exclusive_group")
+    group_info = EXCLUSIVE_GROUPS.get(group, {})
+    if group and group_info.get("enforcement") == "manual":
+        manual_exclusive.setdefault(group, []).append(trait)
+    else:
+        manual_nonexclusive.append(trait)
+
+for group, perks in manual_exclusive.items():
+    group_title = group.replace("_", " ").title()
+    ttk.Label(manual_frame, text=f"{group_title} (pick one)").pack(anchor="w", pady=(2, 0))
+    group_var = tk.StringVar(value="")
+    manual_group_vars[group] = group_var
+    for perk in perks:
+        icon = perk.get("icon", "") or ""
+        desc = perk.get("description", "") or ""
+        label = (
+            f"{icon} {perk['name']} "
+            f"({fmt_points(perk.get('buy_points', 0))}/{fmt_points(perk.get('sell_points', 0))})"
+        )
+        if desc:
+            label = f"{label} - {desc}"
+        radio_kwargs = {
+            "text": label,
+            "value": perk["id"],
+            "variable": group_var,
+            "command": update_display,
+        }
+        if perk_radio_style:
+            radio_kwargs["style"] = perk_radio_style
+        ttk.Radiobutton(manual_frame, **radio_kwargs).pack(anchor="w")
+    ttk.Label(manual_frame, text="").pack(anchor="w")
+
+manual_nonexclusive_by_category = {}
+for trait in manual_nonexclusive:
+    category = trait.get("category") or "Other"
+    manual_nonexclusive_by_category.setdefault(category, []).append(trait)
+
+for category, perks in manual_nonexclusive_by_category.items():
+    category_title = category.replace("_", " ").title()
+    ttk.Label(manual_frame, text=f"{category_title} (multi)").pack(anchor="w", pady=(2, 0))
+    for perk in perks:
+        icon = perk.get("icon", "") or ""
+        desc = perk.get("description", "") or ""
+        label = (
+            f"{icon} {perk['name']} "
+            f"({fmt_points(perk.get('buy_points', 0))}/{fmt_points(perk.get('sell_points', 0))})"
+        )
+        if desc:
+            label = f"{label} - {desc}"
+        var = tk.IntVar(value=0)
+        manual_trait_vars[perk["id"]] = var
+        check_kwargs = {
+            "text": label,
+            "variable": var,
+            "command": update_display,
+        }
+        if perk_check_style:
+            check_kwargs["style"] = perk_check_style
+        ttk.Checkbutton(manual_frame, **check_kwargs).pack(anchor="w")
+    ttk.Label(manual_frame, text="").pack(anchor="w")
 
 ttk.Label(recommend, textvariable=recommendation_warning_var, justify="left").grid(
-    row=4, column=0, sticky="w", padx=6, pady=(6, 2)
+    row=5, column=0, sticky="w", padx=6, pady=(6, 2)
+)
+ttk.Label(recommend, textvariable=manual_points_var, justify="left").grid(
+    row=6, column=0, sticky="w", padx=6, pady=(0, 2)
 )
 ttk.Label(
     recommend,
     textvariable=recommendation_var,
     justify="left",
     wraplength=240,
-).grid(row=5, column=0, sticky="nw", padx=6, pady=(0, 6))
+).grid(row=7, column=0, sticky="nw", padx=6, pady=(0, 6))
 ttk.Button(recommend, text="Refresh", command=refresh_recommendation).grid(
-    row=6, column=0, sticky="ew", padx=6, pady=(0, 4)
+    row=8, column=0, sticky="ew", padx=6, pady=(0, 4)
 )
 apply_btn = tk.Button(
     recommend,
@@ -1964,7 +2321,7 @@ apply_btn = tk.Button(
     activebackground="#b71c1c",
     activeforeground="white",
 )
-apply_btn.grid(row=7, column=0, sticky="ew", padx=6, pady=(0, 6))
+apply_btn.grid(row=9, column=0, sticky="ew", padx=6, pady=(0, 6))
 
 main.rowconfigure(0, weight=1)
 main.columnconfigure(1, weight=1)
