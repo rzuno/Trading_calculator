@@ -4,5 +4,4 @@ env/
 venv/
 *.csv
 average_calculator.py
-*.md
 main_v14.py
