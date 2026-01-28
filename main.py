@@ -1,9 +1,11 @@
 ﻿import csv
+import json
 import os
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
+import tkinter.font as tkfont
 from math import ceil
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import matplotlib
 
@@ -18,27 +20,37 @@ except ImportError:
     YFINANCE_AVAILABLE = False
     print("Warning: yfinance not installed. Price fetching disabled.")
 
-try:
-    from gear_boxes import model_A as gearbox_model
-    GEARBOX_MODELS = gearbox_model.GEARBOX_MODELS
-    DEFAULT_GEARBOX_MODEL = gearbox_model.DEFAULT_MODEL
-    gearbox_recommend = gearbox_model.recommend
-except Exception:
-    GEARBOX_MODELS = {"Model A": {"name": "Model A"}}
-    DEFAULT_GEARBOX_MODEL = "Model A"
+TRAIT_CONFIG_PATH = os.path.join("trait system", "trait_system_v2_points.json")
+TRAIT_CONFIG = None
+TRAIT_SYSTEM = {}
+TRAIT_CATEGORIES = {}
+TRAITS = []
+AUTO_TRAITS = []
+MANUAL_TRAITS = []
+perk_font = None
+perk_check_style = None
 
-    def gearbox_recommend(model_name, context):
-        return {
-            "model": "Unavailable",
-            "buy_gear": int(context.get("buy_gear", 3) or 3),
-            "sell_gear": int(context.get("sell_gear", 3) or 3),
-            "delta_buy": 0,
-            "delta_sell": 0,
-            "status": "NEEDS DATA",
-            "confidence": 0.0,
-            "notes": "Gearbox module failed to load.",
-            "adjustments": [],
-        }
+
+def load_trait_config():
+    global TRAIT_CONFIG, TRAIT_SYSTEM, TRAIT_CATEGORIES, TRAITS, AUTO_TRAITS, MANUAL_TRAITS
+    with open(TRAIT_CONFIG_PATH, "r", encoding="utf-8") as f:
+        TRAIT_CONFIG = json.load(f)
+    TRAIT_SYSTEM = TRAIT_CONFIG.get("system_config", {})
+    TRAIT_CATEGORIES = TRAIT_CONFIG.get("trait_categories", {})
+    TRAITS = TRAIT_CONFIG.get("traits", [])
+    AUTO_TRAITS = []
+    MANUAL_TRAITS = []
+    for trait in TRAITS:
+        category = trait.get("category")
+        category_auto = TRAIT_CATEGORIES.get(category, {}).get("auto", True)
+        auto_trigger = trait.get("auto_trigger")
+        if category_auto and auto_trigger:
+            AUTO_TRAITS.append(trait)
+        else:
+            MANUAL_TRAITS.append(trait)
+
+
+load_trait_config()
 
 
 DATA_FILE = "data.csv"
@@ -121,7 +133,6 @@ def default_record(market="KR"):
         "buy_mode": "LOAD",
         "buy_gear": 3,
         "sell_gear": 3,
-        "gearbox_model": DEFAULT_GEARBOX_MODEL,
         # v1.4 new fields
         "units_held": 0,  # Position size for RESCUE gear calculation
         "current_price": "",  # Latest fetched price
@@ -161,12 +172,6 @@ def load_data():
                     except (TypeError, ValueError):
                         return ""
 
-                def to_int(val, default=0):
-                    try:
-                        return int(float(val))
-                    except (TypeError, ValueError):
-                        return default
-
                 avg_cost = to_float(row.get("avg_cost", ""))
                 num_shares = to_float(row.get("num_shares", ""))
                 max_volume = to_float(row.get("max_volume", ""))
@@ -192,13 +197,14 @@ def load_data():
                 buy_mode = (row.get("buy_mode") or "LOAD").strip().upper()
                 if buy_mode not in ("LOAD", "RELOAD"):
                     buy_mode = "LOAD"
-                buy_gear = to_int(row.get("buy_gear", 3), 3)
-                buy_gear = max(1, min(5, buy_gear))
-                sell_gear = to_int(row.get("sell_gear", 3), 3)
-                sell_gear = max(0, min(5, sell_gear))
-                gearbox_model = (row.get("gearbox_model") or DEFAULT_GEARBOX_MODEL).strip()
-                if gearbox_model not in GEARBOX_MODELS:
-                    gearbox_model = DEFAULT_GEARBOX_MODEL
+                buy_gear = to_float(row.get("buy_gear", 3.0))
+                if buy_gear == "":
+                    buy_gear = 3.0
+                buy_gear = clamp_gear(buy_gear, 1.0, 5.0)
+                sell_gear = to_float(row.get("sell_gear", 3.0))
+                if sell_gear == "":
+                    sell_gear = 3.0
+                sell_gear = clamp_gear(sell_gear, 1.0, 5.0)
 
                 def parse_manual_gear(val):
                     try:
@@ -253,7 +259,6 @@ def load_data():
                     "buy_mode": buy_mode,
                     "buy_gear": buy_gear,
                     "sell_gear": sell_gear,
-                    "gearbox_model": gearbox_model,
                     # v1.4 fields
                     "units_held": units_held,
                     "current_price": current_price,
@@ -305,7 +310,6 @@ def write_data_file():
         "buy_mode",
         "buy_gear",
         "sell_gear",
-        "gearbox_model",
         # v1.4 new fields
         "units_held",
         "current_price",
@@ -346,7 +350,6 @@ def write_data_file():
                     "buy_mode": rec.get("buy_mode", "LOAD"),
                     "buy_gear": rec.get("buy_gear", 3),
                     "sell_gear": rec.get("sell_gear", 3),
-                    "gearbox_model": rec.get("gearbox_model", DEFAULT_GEARBOX_MODEL),
                     # v1.4 fields
                     "units_held": rec.get("units_held", 0),
                     "current_price": rec.get("current_price", ""),
@@ -418,6 +421,133 @@ def format_input(val, market="KR", is_money=True, decimals=2):
         return f"{val:,.{decimals}f}"
     except (TypeError, ValueError):
         return ""
+
+
+def parse_yymmdd(value):
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    if len(digits) == 8:
+        digits = digits[2:]
+    if len(digits) != 6:
+        return None
+    try:
+        yy = int(digits[:2])
+        mm = int(digits[2:4])
+        dd = int(digits[4:6])
+        return datetime(2000 + yy, mm, dd).date()
+    except ValueError:
+        return None
+
+
+def trading_days_since(value):
+    last = parse_yymmdd(value)
+    if not last:
+        return 0
+    today = datetime.now().date()
+    if last >= today:
+        return 0
+    days = 0
+    cursor = last
+    while cursor < today:
+        cursor = cursor + timedelta(days=1)
+        if cursor.weekday() < 5:
+            days += 1
+    return days
+
+
+def safe_eval(expr, metrics):
+    if not expr:
+        return False
+    try:
+        return bool(eval(expr, {"__builtins__": {}}, metrics))
+    except Exception:
+        return False
+
+
+def clamp_gear(val, lo=1.0, hi=5.0):
+    return max(lo, min(hi, val))
+
+
+def compute_trait_metrics(parsed, data):
+    current = float(data.get("current_price", 0) or 0)
+    high_5d = float(data.get("high_5d", 0) or 0)
+    high_10d = float(data.get("high_10d", 0) or 0)
+    low_today = float(data.get("low_today", 0) or 0)
+    avg_cost = float(parsed.get("avg_cost", 0) or 0)
+    if float(parsed.get("num_shares", 0) or 0) <= 0:
+        avg_cost = 0.0
+
+    ref = high_5d if high_5d > 0 else high_10d
+    atr_pct = ((high_5d - low_today) / current * 100) if current > 0 and high_5d > 0 and low_today > 0 else 0.0
+    roc = ((current - ref) / ref * 100) if current > 0 and ref > 0 else 0.0
+    deployed_pct = float(data.get("total_u", 0) or 0) * 100.0
+    pnl_pct = ((current - avg_cost) / avg_cost * 100) if avg_cost > 0 and current > 0 else 0.0
+    fx_current = float(parsed.get("fx_rate", 0) or 0)
+    fx_avg = fx_current
+    is_us_stock = parsed.get("market") == "US"
+    idle_days = trading_days_since(parsed.get("latest_trading_day", ""))
+
+    return {
+        "atr_pct": atr_pct,
+        "roc": roc,
+        "deployed_pct": deployed_pct,
+        "pnl_pct": pnl_pct,
+        "fx_current": fx_current,
+        "fx_avg": fx_avg,
+        "is_us_stock": is_us_stock,
+        "idle_days": idle_days,
+    }
+
+
+def evaluate_traits(metrics, manual_states):
+    active_auto = []
+    active_manual = []
+    for trait in AUTO_TRAITS:
+        if safe_eval(trait.get("auto_trigger"), metrics):
+            active_auto.append(trait)
+    for trait in MANUAL_TRAITS:
+        if manual_states.get(trait["id"], False):
+            active_manual.append(trait)
+    return active_auto, active_manual
+
+
+def compute_perk_gears(metrics, manual_states):
+    buy_points = 0.0
+    sell_points = 0.0
+    active_auto, active_manual = evaluate_traits(metrics, manual_states)
+    active = active_auto + active_manual
+    for trait in active:
+        buy_points += trait.get("buy_points", 0)
+        sell_points += trait.get("sell_points", 0)
+
+    ratio = float(TRAIT_SYSTEM.get("point_to_gear_ratio", 10.0))
+    base_buy = float(TRAIT_SYSTEM.get("base_buy_gear", 3.0))
+    base_sell = float(TRAIT_SYSTEM.get("base_sell_gear", 3.0))
+    gear_min = float(TRAIT_SYSTEM.get("gear_min", 1.0))
+    gear_max = float(TRAIT_SYSTEM.get("gear_max", 5.0))
+
+    buy_shift = buy_points / ratio if ratio else 0.0
+    sell_shift = sell_points / ratio if ratio else 0.0
+    raw_buy = base_buy + buy_shift
+    raw_sell = base_sell + sell_shift
+    buy_gear = clamp_gear(raw_buy, gear_min, gear_max)
+    sell_gear = clamp_gear(raw_sell, gear_min, gear_max)
+
+    if manual_states.get("black_swan"):
+        sell_gear = 0.0
+
+    return {
+        "buy_points": buy_points,
+        "sell_points": sell_points,
+        "buy_shift": buy_shift,
+        "sell_shift": sell_shift,
+        "buy_gear": buy_gear,
+        "sell_gear": sell_gear,
+        "active_auto": active_auto,
+        "active_manual": active_manual,
+        "ratio": ratio,
+        "base_buy": base_buy,
+        "base_sell": base_sell,
+    }
 
 
 def normalize_last_trade(value):
@@ -531,11 +661,23 @@ def compute_sell_targets_v1_4(avg_cost, s):
 
 
 def compute_buy_drop_pct(buy_gear):
-    return BUY_GEAR_DROPS.get(buy_gear, BUY_GEAR_DROPS[3])
+    try:
+        gear = float(buy_gear)
+    except (TypeError, ValueError):
+        gear = 3.0
+    return 2.0 + gear
 
 
 def compute_sell_targets_3tier(avg_cost, sell_gear):
-    tiers = SELL_GEAR_TIERS.get(sell_gear, SELL_GEAR_TIERS[3])
+    try:
+        gear = float(sell_gear)
+    except (TypeError, ValueError):
+        gear = 3.0
+    if gear <= 0:
+        tiers = (1.0, 2.0, 3.0)
+    else:
+        tier1 = 1.0 + gear
+        tiers = (tier1, tier1 + 2.0, tier1 + 4.0)
     targets = [avg_cost * (1 + pct / 100) for pct in tiers]
     return targets, tiers
 
@@ -913,13 +1055,10 @@ def parse_form_inputs():
         max_volume = to_float_str(max_volume_var.get(), GLOBAL_MAX_VOLUME_KRW or 0.0)
         market = market_var.get()
         fx_rate = to_float_str(fx_rate_var.get(), GLOBAL_FX_RATE) if market == "US" else to_float_str(fx_rate_var.get() or GLOBAL_FX_RATE, GLOBAL_FX_RATE)
-        buy_gear = int(to_float_str(buy_gear_var.get(), 3))
-        sell_gear = int(to_float_str(sell_gear_var.get(), 3))
-        buy_gear = max(1, min(5, buy_gear))
-        sell_gear = max(0, min(5, sell_gear))
-        gearbox_model = gearbox_var.get().strip() or DEFAULT_GEARBOX_MODEL
-        if gearbox_model not in GEARBOX_MODELS:
-            gearbox_model = DEFAULT_GEARBOX_MODEL
+        buy_gear = to_float_str(buy_gear_var.get(), 3.0)
+        sell_gear = to_float_str(sell_gear_var.get(), 3.0)
+        buy_gear = round(clamp_gear(buy_gear, 1.0, 5.0), 1)
+        sell_gear = round(clamp_gear(sell_gear, 1.0, 5.0), 1)
         last_trade = normalize_last_trade(latest_trading_day_var.get())
         if (
             avg_cost < 0
@@ -949,7 +1088,6 @@ def parse_form_inputs():
         "manual_rescue_mode": manual_rescue_var.get().strip().upper() or "AUTO",
         "buy_gear": buy_gear,
         "sell_gear": sell_gear,
-        "gearbox_model": gearbox_model,
         "latest_trading_day": last_trade,
         "units_held": units_held,
         "unit_size_krw": unit_size_krw,
@@ -967,16 +1105,14 @@ def fill_form_from_record(name):
     max_volume_var.set("" if rec["max_volume"] == "" else format_input(rec["max_volume"], "KR"))
     fx_rate_var.set(format_input(GLOBAL_FX_RATE, "KR", decimals=2))
     latest_trading_day_var.set(rec.get("latest_trading_day", ""))
-    buy_gear_var.set(str(rec.get("buy_gear", 3)))
-    sell_gear_var.set(str(rec.get("sell_gear", 3)))
-    gearbox_model = rec.get("gearbox_model", DEFAULT_GEARBOX_MODEL)
-    if gearbox_model not in GEARBOX_MODELS:
-        gearbox_model = DEFAULT_GEARBOX_MODEL
-    gearbox_var.set(gearbox_model)
+    buy_gear_var.set(float(rec.get("buy_gear", 3.0) or 3.0))
+    sell_gear_var.set(float(rec.get("sell_gear", 3.0) or 3.0))
     manual_rescue_mode = (rec.get("manual_rescue_mode", "AUTO") or "AUTO").strip().upper()
     if manual_rescue_mode not in ("AUTO", "DEFAULT", "HEAVY", "LIGHT"):
         manual_rescue_mode = "AUTO"
     manual_rescue_var.set(manual_rescue_mode)
+    update_buy_gear_label()
+    update_sell_gear_label()
     update_market_state()
 
 
@@ -989,10 +1125,11 @@ def clear_form_fields():
     fx_rate_var.set(format_input(GLOBAL_FX_RATE, "KR", decimals=2))
     market_var.set("KR")
     latest_trading_day_var.set("")
-    buy_gear_var.set("3")
-    sell_gear_var.set("3")
-    gearbox_var.set(DEFAULT_GEARBOX_MODEL)
+    buy_gear_var.set(3.0)
+    sell_gear_var.set(3.0)
     manual_rescue_var.set("AUTO")
+    update_buy_gear_label()
+    update_sell_gear_label()
     update_market_state()
 
 
@@ -1114,7 +1251,6 @@ def on_save():
             "buy_mode": "LOAD" if parsed["num_shares"] <= 0 else "RELOAD",
             "buy_gear": parsed["buy_gear"],
             "sell_gear": parsed["sell_gear"],
-            "gearbox_model": parsed["gearbox_model"],
         }
     )
     rec["buy_model"] = rec.get("buy_model", list(BUY_MODELS.keys())[0])
@@ -1183,11 +1319,11 @@ def update_display(force_recommendation=False):
             rescue_tag = f"Rescue G{gear:.1f}"
         rescue_summary = f"{rescue_tag} (-{fmt_compact(drop_pct)}%, r={fmt_compact(r)})"
     buy_info_var.set(
-        f"{data['buy_mode']} gear {parsed['buy_gear']} (-{data['buy_drop_pct']:.1f}%)\n{rescue_summary}"
+        f"{data['buy_mode']} gear {parsed['buy_gear']:.1f} (-{data['buy_drop_pct']:.1f}%)\n{rescue_summary}"
     )
 
     sell_info_var.set(
-        f"Sell gear {data['sell_gear']}: +{data['sell_tiers'][0]:.1f}%/"
+        f"Sell gear {data['sell_gear']:.1f}: +{data['sell_tiers'][0]:.1f}%/"
         f"+{data['sell_tiers'][1]:.1f}%/+{data['sell_tiers'][2]:.1f}%"
     )
 
@@ -1196,7 +1332,7 @@ def update_display(force_recommendation=False):
         f"Last trade (YYMMDD): {parsed['latest_trading_day'] or 'N/A'}",
         f"Units: {units_held_var.get()} | Avg cost: {fmt_val(effective_avg_cost)}",
         f"Current: {fmt_price(data['current_price'])} | Low/High: {fmt_price(data['low_today'])}/{fmt_price(data['high_today'])}",
-        f"{data['buy_mode']} gear {parsed['buy_gear']}: -{data['buy_drop_pct']:.1f}% -> {fmt_price(data['buy_trigger'])} | Status: {data['buy_status']}",
+        f"{data['buy_mode']} gear {parsed['buy_gear']:.1f}: -{data['buy_drop_pct']:.1f}% -> {fmt_price(data['buy_trigger'])} | Status: {data['buy_status']}",
     ]
     if show_buy_context:
         result_lines.insert(
@@ -1218,7 +1354,7 @@ def update_display(force_recommendation=False):
         result_lines.append("RESCUE: N/A (no units)")
 
     if parsed["num_shares"] > 0:
-        sell_line = f"SELL gear {data['sell_gear']} (deployment {data['total_u']*100:.1f}%)"
+        sell_line = f"SELL gear {data['sell_gear']:.1f} (deployment {data['total_u']*100:.1f}%)"
         result_lines.append(sell_line)
         result_lines.append(
             f"Tier 1 (50%): {fmt_val(data['sell_targets'][0])} (+{data['sell_tiers'][0]:.1f}%)"
@@ -1237,31 +1373,38 @@ def update_display(force_recommendation=False):
 
     result_var.set("\n".join(result_lines))
 
-    recommendation_context = {
-        "avg_cost": parsed["avg_cost"],
-        "current_price": data["current_price"],
-        "high_10d": data["high_10d"],
-        "high_5d": data["high_5d"],
-        "low_today": data["low_today"],
-        "buy_gear": parsed["buy_gear"],
-        "sell_gear": parsed["sell_gear"],
-        "buy_mode": data["buy_mode"],
-        "latest_trading_day": parsed["latest_trading_day"],
-        "deployment_ratio": data["total_u"],
-    }
-    if data["total_u"] >= 0.7:
-        recommendation_warning_var.set(f"Deplyment {data['total_u']*100:.0f}% -> sell -2")
-    elif data["total_u"] >= 0.4:
-        recommendation_warning_var.set(f"Deplyment {data['total_u']*100:.0f}% -> sell -1")
-    else:
-        recommendation_warning_var.set("")
+    metrics = compute_trait_metrics(parsed, data)
+    manual_states = {trait_id: bool(var.get()) for trait_id, var in manual_trait_vars.items()}
     if (not rec_locked) or force_recommendation:
-        recommendation = gearbox_recommend(parsed["gearbox_model"], recommendation_context)
+        perk = compute_perk_gears(metrics, manual_states)
         global latest_recommendation
-        latest_recommendation = recommendation
-        recommendation_var.set(
-            format_recommendation_text(recommendation, parsed["buy_gear"], parsed["sell_gear"])
-        )
+        latest_recommendation = perk
+        recommendation_warning_var.set(f"Ratio: {perk['ratio']:.1f} pts/gear")
+
+        auto_lines = []
+        for trait in perk["active_auto"]:
+            icon = trait.get("icon", "") or ""
+            desc = trait.get("description", "") or ""
+            line = f"- {icon} {trait['name']} ({trait.get('buy_points',0):+}/{trait.get('sell_points',0):+})"
+            if desc:
+                line = f"{line} - {desc}"
+            auto_lines.append(line.strip())
+        if not auto_lines:
+            auto_lines = ["(none)"]
+        auto_traits_text.config(state="normal")
+        auto_traits_text.delete("1.0", tk.END)
+        auto_traits_text.insert("1.0", "\n".join(auto_lines))
+        auto_traits_text.config(state="disabled")
+
+        summary_lines = [
+            f"Buy points: {perk['buy_points']:+.1f} -> shift {perk['buy_shift']:+.2f}",
+            f"Sell points: {perk['sell_points']:+.1f} -> shift {perk['sell_shift']:+.2f}",
+            f"Base gears: {perk['base_buy']:.1f} / {perk['base_sell']:.1f}",
+            f"Final gears: {perk['buy_gear']:.2f} / {perk['sell_gear']:.2f}",
+        ]
+        if manual_states.get("black_swan"):
+            summary_lines.append("Black Swan active: sell gear forced to 0.0")
+        recommendation_var.set("\n".join(summary_lines))
 
     plot_levels(
         name=current_name,
@@ -1302,17 +1445,18 @@ def apply_recommendation():
         messagebox.showinfo("Recommendation", "Change is already applied. Use Cancel to revert.")
         return
     previous_gears = (buy_gear_var.get(), sell_gear_var.get())
-    if (
-        str(latest_recommendation.get("buy_gear", buy_gear_var.get())) == buy_gear_var.get()
-        and str(latest_recommendation.get("sell_gear", sell_gear_var.get())) == sell_gear_var.get()
-    ):
+    target_buy = float(latest_recommendation.get("buy_gear", buy_gear_var.get()))
+    target_sell = float(latest_recommendation.get("sell_gear", sell_gear_var.get()))
+    if abs(target_buy - float(buy_gear_var.get())) < 1e-6 and abs(target_sell - float(sell_gear_var.get())) < 1e-6:
         messagebox.showinfo("Recommendation", "Recommendation not applied (no change).")
         previous_gears = None
         return
-    buy_gear_var.set(str(latest_recommendation.get("buy_gear", buy_gear_var.get())))
-    sell_gear_var.set(str(latest_recommendation.get("sell_gear", sell_gear_var.get())))
+    buy_gear_var.set(target_buy)
+    sell_gear_var.set(target_sell)
     rec_locked = True
     update_display()
+    if apply_btn:
+        apply_btn.config(text="Applied ✓", bg="#2e7d32", activebackground="#1b5e20")
     messagebox.showinfo("Recommendation", "Change is applied.")
 
 
@@ -1326,6 +1470,15 @@ def cancel_recommendation():
     previous_gears = None
     rec_locked = False
     update_display(force_recommendation=True)
+    if apply_btn:
+        apply_btn.config(text="Apply", bg="#c62828", activebackground="#b71c1c")
+
+
+def toggle_apply():
+    if rec_locked:
+        cancel_recommendation()
+    else:
+        apply_recommendation()
 
 
 def refresh_recommendation():
@@ -1514,6 +1667,28 @@ def update_manual_rescue_state(*args):
     update_display()
 
 
+def update_buy_gear_label(*args):
+    if "buy_gear_label" not in globals():
+        return
+    try:
+        val = float(buy_gear_var.get())
+    except (TypeError, ValueError):
+        val = 3.0
+    buy_gear_label.config(text=f"{val:.1f}")
+    update_display()
+
+
+def update_sell_gear_label(*args):
+    if "sell_gear_label" not in globals():
+        return
+    try:
+        val = float(sell_gear_var.get())
+    except (TypeError, ValueError):
+        val = 3.0
+    sell_gear_label.config(text=f"{val:.1f}")
+    update_display()
+
+
 def update_market_state():
     # Always show FX and keep it editable for both KR and US; for KR it still stores a value.
     fx_entry.state(["!disabled"])
@@ -1539,6 +1714,14 @@ def center_window(window):
 # ---------------- UI ----------------
 root = tk.Tk()
 root.title("AI Seesaw Trading Calculator")
+try:
+    if "Segoe UI Emoji" in tkfont.families(root):
+        perk_font = tkfont.Font(root=root, family="Segoe UI Emoji", size=9)
+        perk_check_style = "Perk.TCheckbutton"
+        ttk.Style(root).configure(perk_check_style, font=perk_font)
+except tk.TclError:
+    perk_font = None
+    perk_check_style = None
 
 main = ttk.Frame(root, padding=12)
 main.grid(sticky="nsew")
@@ -1558,9 +1741,8 @@ max_volume_var = tk.StringVar()
 fx_rate_var = tk.StringVar()
 market_var = tk.StringVar(value="KR")
 latest_trading_day_var = tk.StringVar()
-buy_gear_var = tk.StringVar(value="3")
-sell_gear_var = tk.StringVar(value="3")
-gearbox_var = tk.StringVar(value=DEFAULT_GEARBOX_MODEL)
+buy_gear_var = tk.DoubleVar(value=3.0)
+sell_gear_var = tk.DoubleVar(value=3.0)
 manual_rescue_var = tk.StringVar(value="AUTO")
 result_var = tk.StringVar()
 buy_info_var = tk.StringVar()
@@ -1570,6 +1752,8 @@ latest_recommendation = None
 previous_gears = None
 rec_locked = False
 recommendation_warning_var = tk.StringVar()
+manual_trait_vars = {}
+apply_btn = None
 
 form = ttk.Frame(main)
 form.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
@@ -1624,26 +1808,32 @@ ttk.Entry(latest_frame, textvariable=latest_trading_day_var, width=16).grid(row=
 gear_frame = ttk.LabelFrame(form, text="Gears")
 gear_frame.grid(row=8, column=0, columnspan=2, sticky="ew", padx=4, pady=4)
 ttk.Label(gear_frame, text="Buy gear (1-5)").grid(row=0, column=0, sticky="w", padx=(0, 8))
-buy_gear_combo = ttk.Combobox(
+buy_gear_slider = ttk.Scale(
     gear_frame,
-    textvariable=buy_gear_var,
-    values=[str(n) for n in range(1, 6)],
-    state="readonly",
-    width=6,
+    from_=1.0,
+    to=5.0,
+    orient="horizontal",
+    variable=buy_gear_var,
+    command=update_buy_gear_label,
+    length=160,
 )
-buy_gear_combo.grid(row=0, column=1, sticky="w")
-buy_gear_combo.bind("<<ComboboxSelected>>", lambda _e: update_display())
+buy_gear_slider.grid(row=0, column=1, sticky="w")
+buy_gear_label = ttk.Label(gear_frame, text="3.0")
+buy_gear_label.grid(row=0, column=2, sticky="w", padx=(6, 0))
 
-ttk.Label(gear_frame, text="Sell gear (0-5)").grid(row=1, column=0, sticky="w", padx=(0, 8))
-sell_gear_combo = ttk.Combobox(
+ttk.Label(gear_frame, text="Sell gear (1-5)").grid(row=1, column=0, sticky="w", padx=(0, 8))
+sell_gear_slider = ttk.Scale(
     gear_frame,
-    textvariable=sell_gear_var,
-    values=[str(n) for n in range(0, 6)],
-    state="readonly",
-    width=6,
+    from_=1.0,
+    to=5.0,
+    orient="horizontal",
+    variable=sell_gear_var,
+    command=update_sell_gear_label,
+    length=160,
 )
-sell_gear_combo.grid(row=1, column=1, sticky="w")
-sell_gear_combo.bind("<<ComboboxSelected>>", lambda _e: update_display())
+sell_gear_slider.grid(row=1, column=1, sticky="w")
+sell_gear_label = ttk.Label(gear_frame, text="3.0")
+sell_gear_label.grid(row=1, column=2, sticky="w", padx=(6, 0))
 
 buy_frame = ttk.LabelFrame(form, text="Buy")
 buy_frame.grid(row=9, column=0, columnspan=2, sticky="ew", padx=4, pady=4)
@@ -1710,37 +1900,71 @@ fig = Figure(figsize=(7.8, 4.0), dpi=100)
 canvas = FigureCanvasTkAgg(fig, master=output)
 canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
 
-recommend = ttk.LabelFrame(main, text="Recommendation")
+recommend = ttk.LabelFrame(main, text="Perk Recommendation")
 recommend.grid(row=0, column=2, sticky="n", padx=(12, 0))
 recommend.columnconfigure(0, weight=1)
-ttk.Label(recommend, text="Gearbox").grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
-gearbox_combo = ttk.Combobox(
-    recommend,
-    textvariable=gearbox_var,
-    values=list(GEARBOX_MODELS.keys()),
-    state="readonly",
-    width=26,
-)
-gearbox_combo.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 6))
-gearbox_combo.bind("<<ComboboxSelected>>", lambda _e: update_display())
+
+ttk.Label(recommend, text="Auto Traits").grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
+auto_traits_kwargs = {"width": 30, "height": 8, "wrap": "word"}
+if perk_font:
+    auto_traits_kwargs["font"] = perk_font
+auto_traits_text = tk.Text(recommend, **auto_traits_kwargs)
+auto_traits_text.grid(row=1, column=0, sticky="ew", padx=6)
+auto_traits_text.config(state="disabled")
+
+ttk.Label(recommend, text="Manual Traits").grid(row=2, column=0, sticky="w", padx=6, pady=(6, 2))
+manual_canvas = tk.Canvas(recommend, height=200)
+manual_canvas.grid(row=3, column=0, sticky="ew", padx=6)
+manual_scroll = ttk.Scrollbar(recommend, orient="vertical", command=manual_canvas.yview)
+manual_scroll.grid(row=3, column=1, sticky="ns")
+manual_canvas.configure(yscrollcommand=manual_scroll.set)
+manual_frame = ttk.Frame(manual_canvas)
+manual_canvas.create_window((0, 0), window=manual_frame, anchor="nw")
+
+def _manual_scroll_region(event):
+    manual_canvas.configure(scrollregion=manual_canvas.bbox("all"))
+
+manual_frame.bind("<Configure>", _manual_scroll_region)
+
+for trait in MANUAL_TRAITS:
+    icon = trait.get("icon", "") or ""
+    desc = trait.get("description", "") or ""
+    label = f"{icon} {trait['name']} ({trait.get('buy_points',0):+}/{trait.get('sell_points',0):+})"
+    if desc:
+        label = f"{label} - {desc}"
+    var = tk.IntVar(value=0)
+    manual_trait_vars[trait["id"]] = var
+    check_kwargs = {
+        "text": label,
+        "variable": var,
+        "command": update_display,
+    }
+    if perk_check_style:
+        check_kwargs["style"] = perk_check_style
+    ttk.Checkbutton(manual_frame, **check_kwargs).pack(anchor="w")
+
 ttk.Label(recommend, textvariable=recommendation_warning_var, justify="left").grid(
-    row=2, column=0, sticky="w", padx=6, pady=(0, 4)
+    row=4, column=0, sticky="w", padx=6, pady=(6, 2)
 )
 ttk.Label(
     recommend,
     textvariable=recommendation_var,
     justify="left",
     wraplength=240,
-).grid(row=3, column=0, sticky="nw", padx=6, pady=(0, 6))
+).grid(row=5, column=0, sticky="nw", padx=6, pady=(0, 6))
 ttk.Button(recommend, text="Refresh", command=refresh_recommendation).grid(
-    row=4, column=0, sticky="ew", padx=6, pady=(0, 4)
+    row=6, column=0, sticky="ew", padx=6, pady=(0, 4)
 )
-ttk.Button(recommend, text="Apply", command=apply_recommendation).grid(
-    row=5, column=0, sticky="ew", padx=6, pady=(0, 4)
+apply_btn = tk.Button(
+    recommend,
+    text="Apply",
+    command=lambda: toggle_apply(),
+    bg="#c62828",
+    fg="white",
+    activebackground="#b71c1c",
+    activeforeground="white",
 )
-ttk.Button(recommend, text="Cancel", command=cancel_recommendation).grid(
-    row=6, column=0, sticky="ew", padx=6, pady=(0, 6)
-)
+apply_btn.grid(row=7, column=0, sticky="ew", padx=6, pady=(0, 6))
 
 main.rowconfigure(0, weight=1)
 main.columnconfigure(1, weight=1)
