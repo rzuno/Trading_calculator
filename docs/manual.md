@@ -1,7 +1,7 @@
-# AI Seesaw Trading Manual (v1.4.2)
+# AI Seesaw Trading Manual (v1.4.3)
 **Current spec:** Semi-autonomous trading machine + point-based perk system (v0.2)
 **Execution:** Human decides; machine calculates triggers, ladders, and gear recommendations.
-**Scope:** AI-sector stocks (KR: Samsung Electronics, SK hynix; US: NVIDIA, Alphabet/Google).
+**Scope:** AI-sector stocks (KR: Samsung Electronics, SK hynix; US: NVIDIA, Alphabet/Google) + USD/KRW wallet panel.
 
 ---
 
@@ -54,9 +54,10 @@ Minimum state per stock:
 ## 2) Price References and Data Inputs
 We use daily OHLCV (and intraday high/low if available):
 - **High5:** highest High of the previous 5 completed trading days (exclude today)
+- **High10:** highest High of the last 10 trading days (includes today's high when available)
 - **HighToday / LowToday:** today's intraday high/low (or close in backtests)
 - **Px:** current tradable price at decision time
-- **FX:** USD/KRW rate (for US stocks, if tracked)
+- **FX:** USD/KRW rate (tracked separately in the Dollar panel)
 
 **Anchor High:**
 - After any buy event, set `anchor_high = HighToday`.
@@ -80,15 +81,22 @@ Typical update cadence:
 **Usage:** These scores can drive perk activation (market regime, trend, volatility) or
 bias base gears when you want a manual override.
 
-### 3.2 FX Traffic Light (Two-Front Doctrine)
-We run KR and US divisions independently. We do not convert daily.
-- **R_ref:** average FX rate of your current USD holdings (break-even FX)
-- **Threshold:** +/- 2% as the "worth-it" gap
+### 3.2 FX Traffic Light (Dollar Panel)
+FX is tracked as its own USD/KRW wallet panel, separate from stock perks.
 
-Interpretation:
-- **USD strong (FX > R_ref + 2%)**: green to repatriate, red to buy USD
-- **USD neutral (within +/- 2%)**: yellow; hold and avoid unnecessary conversion
-- **USD weak (FX < R_ref - 2%)**: green to buy USD, red to repatriate
+Inputs:
+- **FX avg cost:** your average KRW per USD basis
+- **USD holdings:** total USD in the wallet
+
+Traffic light (current FX vs avg cost):
+- **Green**: FX <= -2% (USD cheap)
+- **Yellow**: -2% .. +2% (neutral)
+- **Red**: +2% .. +5% (USD expensive)
+- **Premium**: > +5% (very expensive)
+
+The Dollar panel draws reference tiers at **+3% / +5% / +7%** above your FX avg cost.
+FX perks are shown only in this panel and are not applied to stock recommendations.
+The Dollar panel is informational only (no buy/sell gears or manual perks).
 
 ---
 

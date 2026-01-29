@@ -7,6 +7,7 @@ You decide execution (semi-autonomous). Full autonomy is a later milestone.
 ## Scope
 - Focus: AI-sector stocks only.
 - Current universe: Samsung Electronics, SK hynix, NVIDIA, Alphabet (GOOGL/GOOG).
+- USD/KRW wallet tracked in a separate Dollar panel (FX traffic light).
 - This is not financial advice.
 
 ## The Three Living Docs (Only These)
@@ -25,7 +26,7 @@ Git history holds older manual versions; we do not keep them as separate files a
   - **RESCUE** (defensive averaging-down below avg_cost using smooth gearbox sizing)
   - **RESET** (small re-arm buy after Tier 1 fill when price returns to avg_cost)
 - Selling is a **3-tier ladder** (50% / 25% / 25%) using a 5-gear table.
-- Gear selection is guided by a **point-based perk system** with optional macro context (G/L/V, FX).
+- Gear selection is guided by a **point-based perk system** with optional macro context (G/L/V). FX is handled in the Dollar panel.
 
 ## Semi-Autonomous Blueprint
 The program is not an auto-trader yet. It is a trading machine that shows:

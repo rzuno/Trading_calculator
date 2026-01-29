@@ -4,6 +4,15 @@ Dates below follow the historical manual versions in `docs/`.
 
 ---
 
+## [1.4.3] - 2026-01-29
+### Added
+- Dollar (USD/KRW) panel with FX avg cost, USD holdings, traffic light, and 3/5/7% reference tiers.
+### Changed
+- FX perks now apply only in the Dollar panel (removed from stock recommendation logic).
+- High 10d now includes today's high when available.
+
+---
+
 ## [1.4.2] - 2026-01-28
 ### Added
 - Point-based perk system (v0.2) to explain and tune gear shifts.

@@ -69,6 +69,8 @@ FX_AVG_DAYS = 20
 PORTFOLIO_N = 25  # Total units across all stocks
 LOAD_REF_DAYS = 5
 HIGH_CONTEXT_DAYS = 10
+CURRENCY_NAME = "Dollar"
+CURRENCY_MARKET = "FX"
 
 BUY_GEAR_DROPS = {
     1: 3.0,
@@ -126,6 +128,7 @@ def default_record(market="KR"):
     return {
         "avg_cost": "",
         "num_shares": "",
+        "fx_hold_usd": 0.0,
         "max_volume": "",
         "g_score": 0.0,
         "l_score": 0.0,
@@ -152,6 +155,8 @@ def default_record(market="KR"):
         "atr_3d_pct": 0.0,
         "atr_5d_pct": 0.0,
         "fx_avg": GLOBAL_FX_AVG_RATE,
+        "fx_avg_10d": 0.0,
+        "fx_slope_10d": 0.0,
         "applied_buy_gear": "",
         "applied_sell_gear": "",
         "applied_buy_points": "",
@@ -170,6 +175,10 @@ def default_record(market="KR"):
         "manual_mode": 0,
         "manual_gear": 0.0,
     }
+
+
+def is_currency_name(name):
+    return (name or "").strip().lower() == CURRENCY_NAME.lower()
 
 
 def load_data():
@@ -193,9 +202,10 @@ def load_data():
 
                 avg_cost = to_float(row.get("avg_cost", ""))
                 num_shares = to_float(row.get("num_shares", ""))
+                fx_hold_usd = to_float(row.get("fx_hold_usd", 0.0))
                 max_volume = to_float(row.get("max_volume", ""))
                 market = (row.get("market") or "KR").strip().upper()
-                if market not in ("KR", "US"):
+                if market not in ("KR", "US", "FX"):
                     market = "KR"
                 fx_rate = to_float(row.get("fx_rate", GLOBAL_FX_RATE))
                 if fx_rate == "":
@@ -240,6 +250,10 @@ def load_data():
                     return 0.0
 
                 manual_gear_val = parse_manual_gear(row.get("manual_gear", 0.0))
+                if fx_hold_usd == "":
+                    fx_hold_usd = 0.0
+                if market == CURRENCY_MARKET and not fx_hold_usd and num_shares not in ("", 0):
+                    fx_hold_usd = float(num_shares or 0)
 
                 # v1.4 new fields
                 units_held = to_float(row.get("units_held", 0))
@@ -256,6 +270,8 @@ def load_data():
                 atr_3d_pct = to_float(row.get("atr_3d_pct", 0.0))
                 atr_5d_pct = to_float(row.get("atr_5d_pct", 0.0))
                 fx_avg = to_float(row.get("fx_avg", GLOBAL_FX_AVG_RATE))
+                fx_avg_10d = to_float(row.get("fx_avg_10d", 0.0))
+                fx_slope_10d = to_float(row.get("fx_slope_10d", 0.0))
                 applied_buy_gear = to_float(row.get("applied_buy_gear", ""))
                 applied_sell_gear = to_float(row.get("applied_sell_gear", ""))
                 applied_buy_points = to_float(row.get("applied_buy_points", ""))
@@ -280,6 +296,7 @@ def load_data():
                 stock_data[name] = {
                     "avg_cost": avg_cost,
                     "num_shares": num_shares,
+                    "fx_hold_usd": fx_hold_usd,
                     "max_volume": max_volume,
                     "market": market,
                     "fx_rate": fx_rate,
@@ -305,6 +322,8 @@ def load_data():
                     "atr_3d_pct": atr_3d_pct if atr_3d_pct != "" else 0.0,
                     "atr_5d_pct": atr_5d_pct if atr_5d_pct != "" else 0.0,
                     "fx_avg": fx_avg if fx_avg != "" else GLOBAL_FX_AVG_RATE,
+                    "fx_avg_10d": fx_avg_10d if fx_avg_10d != "" else 0.0,
+                    "fx_slope_10d": fx_slope_10d if fx_slope_10d != "" else 0.0,
                     "applied_buy_gear": applied_buy_gear,
                     "applied_sell_gear": applied_sell_gear,
                     "applied_buy_points": applied_buy_points,
@@ -344,12 +363,19 @@ def load_data():
         rec["fx_rate"] = GLOBAL_FX_RATE
         rec["fx_avg"] = GLOBAL_FX_AVG_RATE
 
+    if CURRENCY_NAME not in stock_data:
+        stock_data[CURRENCY_NAME] = default_record(CURRENCY_MARKET)
+    if CURRENCY_NAME in stock_order:
+        stock_order = [name for name in stock_order if name != CURRENCY_NAME]
+    stock_order.append(CURRENCY_NAME)
+
 
 def write_data_file():
     fieldnames = [
         "name",
         "avg_cost",
         "num_shares",
+        "fx_hold_usd",
         "max_volume",
         "g_score",
         "l_score",
@@ -375,6 +401,8 @@ def write_data_file():
         "atr_3d_pct",
         "atr_5d_pct",
         "fx_avg",
+        "fx_avg_10d",
+        "fx_slope_10d",
         "applied_buy_gear",
         "applied_sell_gear",
         "applied_buy_points",
@@ -404,6 +432,7 @@ def write_data_file():
                     "name": name,
                     "avg_cost": rec.get("avg_cost", ""),
                     "num_shares": rec.get("num_shares", ""),
+                    "fx_hold_usd": rec.get("fx_hold_usd", 0.0),
                     "max_volume": rec.get("max_volume", ""),
                     "g_score": rec.get("g_score", ""),
                     "l_score": rec.get("l_score", ""),
@@ -429,6 +458,8 @@ def write_data_file():
                     "atr_3d_pct": rec.get("atr_3d_pct", 0.0),
                     "atr_5d_pct": rec.get("atr_5d_pct", 0.0),
                     "fx_avg": rec.get("fx_avg", GLOBAL_FX_AVG_RATE),
+                    "fx_avg_10d": rec.get("fx_avg_10d", 0.0),
+                    "fx_slope_10d": rec.get("fx_slope_10d", 0.0),
                     "applied_buy_gear": rec.get("applied_buy_gear", ""),
                     "applied_sell_gear": rec.get("applied_sell_gear", ""),
                     "applied_buy_points": rec.get("applied_buy_points", ""),
@@ -456,6 +487,8 @@ def fmt_money(val, market="KR"):
         val = float(val)
         if market == "US":
             return f"${val:,.2f}"
+        if market == "FX":
+            return f"₩{val:,.0f}"
         return f"₩{val:,.0f}"
     except (TypeError, ValueError):
         return ""
@@ -516,6 +549,8 @@ def format_input(val, market="KR", is_money=True, decimals=2):
         val = float(val)
         if is_money:
             if market == "US":
+                return f"{val:,.{decimals}f}"
+            if market == "FX":
                 return f"{val:,.{decimals}f}"
             return f"{val:,.0f}"
         return f"{val:,.{decimals}f}"
@@ -590,6 +625,7 @@ def compute_trait_metrics(parsed, data):
     fx_avg = float(GLOBAL_FX_AVG_RATE or fx_current)
     fx_vs_avg = ((fx_current - fx_avg) / fx_avg * 100) if fx_avg > 0 else 0.0
     is_us_stock = parsed.get("market") == "US"
+    is_fx = parsed.get("market") == CURRENCY_MARKET
     idle_days = trading_days_since(parsed.get("latest_trading_day", ""))
 
     return {
@@ -606,6 +642,7 @@ def compute_trait_metrics(parsed, data):
         "fx_avg": fx_avg,
         "fx_vs_avg": fx_vs_avg,
         "is_us_stock": is_us_stock,
+        "is_fx": is_fx,
         "idle_days": idle_days,
         "days_idle": idle_days,
     }
@@ -614,14 +651,21 @@ def compute_trait_metrics(parsed, data):
 def evaluate_traits(metrics, manual_states):
     active_auto = []
     active_manual = []
+    is_fx = bool(metrics.get("is_fx", False))
     for trait in AUTO_TRAITS:
-        if not metrics.get("is_us_stock") and (trait.get("exclusive_group") == "fx" or trait.get("category") == "fx"):
-            continue
+        is_fx_trait = trait.get("exclusive_group") == "fx" or trait.get("category") == "fx"
+        if is_fx:
+            if not is_fx_trait:
+                continue
+        else:
+            if is_fx_trait:
+                continue
         if safe_eval(trait.get("auto_trigger"), metrics):
             active_auto.append(trait)
-    for trait in MANUAL_TRAITS:
-        if manual_states.get(trait["id"], False):
-            active_manual.append(trait)
+    if not is_fx:
+        for trait in MANUAL_TRAITS:
+            if manual_states.get(trait["id"], False):
+                active_manual.append(trait)
     return active_auto, active_manual
 
 
@@ -816,7 +860,7 @@ def fetch_current_price(stock_name):
     Returns: dict with keys:
         'current': float - current/close price
         'high_5d': float - highest high of past 5 days (excluding today when possible)
-        'high_10d': float - highest high of past 10 days (excluding today when possible)
+        'high_10d': float - highest high of past 10 days (includes today's high when available)
         'low_today': float - today's low
         'high_today': float - today's high
         'timestamp': datetime - fetch time
@@ -934,6 +978,9 @@ def fetch_current_price(stock_name):
         if high_today is None:
             high_today = as_float(hist["High"].iloc[-1])
 
+        if high_today is not None and high_today > 0:
+            high_10d = max(high_10d, float(high_today))
+
         close_series = hist["Close"].copy()
         if not close_series.empty and current:
             close_series.iloc[-1] = float(current)
@@ -967,7 +1014,7 @@ def fetch_fx_rate():
     """
     Fetch USD/KRW exchange rate from Yahoo Finance.
 
-    Returns: dict with keys: current, avg (or None on failure)
+    Returns: dict with keys: current, avg, avg_10d, slope_10d (or None on failure)
     """
     if not YFINANCE_AVAILABLE:
         return None
@@ -983,9 +1030,23 @@ def fetch_fx_rate():
             current = float(intraday["Close"].iloc[-1])
         if current is None:
             current = float(hist["Close"].iloc[-1])
-        avg_series = hist["Close"].tail(FX_AVG_DAYS) if len(hist) >= FX_AVG_DAYS else hist["Close"]
+        close_series = hist["Close"]
+        avg_series = close_series.tail(FX_AVG_DAYS) if len(close_series) >= FX_AVG_DAYS else close_series
         avg = float(avg_series.mean()) if not avg_series.empty else float(current)
-        return {"current": float(current), "avg": avg}
+        tail_10d = close_series.tail(10)
+        avg_10d = float(tail_10d.mean()) if not tail_10d.empty else float(current)
+        slope_10d = 0.0
+        if len(tail_10d) >= 2:
+            first = float(tail_10d.iloc[0])
+            last = float(tail_10d.iloc[-1])
+            if first > 0:
+                slope_10d = (last - first) / first * 100.0
+        return {
+            "current": float(current),
+            "avg": avg,
+            "avg_10d": avg_10d,
+            "slope_10d": slope_10d,
+        }
     except Exception as e:
         print(f"Error fetching FX rate: {e}")
     return None
@@ -1009,6 +1070,8 @@ def refresh_market_data():
         fx_rate_var.set(format_input(GLOBAL_FX_RATE, "KR", decimals=2))
 
     for stock_name in stock_order:
+        if is_currency_name(stock_name) or stock_data.get(stock_name, {}).get("market") == CURRENCY_MARKET:
+            continue
         price_data = fetch_current_price(stock_name)
         if not price_data:
             continue
@@ -1027,6 +1090,16 @@ def refresh_market_data():
         rec["fx_rate"] = GLOBAL_FX_RATE
         rec["fx_avg"] = GLOBAL_FX_AVG_RATE
         stock_data[stock_name] = rec
+
+    if is_currency_name(CURRENCY_NAME):
+        fx_rec = stock_data.get(CURRENCY_NAME, default_record(CURRENCY_MARKET))
+        if new_fx and new_fx.get("current", 0) > 0:
+            fx_rec["current_price"] = new_fx["current"]
+            fx_rec["fx_avg"] = new_fx.get("avg", GLOBAL_FX_AVG_RATE)
+            fx_rec["fx_avg_10d"] = new_fx.get("avg_10d", 0.0)
+            fx_rec["fx_slope_10d"] = new_fx.get("slope_10d", 0.0)
+            fx_rec["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        stock_data[CURRENCY_NAME] = fx_rec
 
     write_data_file()
     load_data()
@@ -1073,7 +1146,7 @@ def compute_total_deployment(current_name, cur_avg_cost, cur_num_shares, cur_max
     total_current = current_volume_krw(cur_avg_cost, cur_num_shares, cur_market, cur_fx_rate)
 
     for name, rec in stock_data.items():
-        if name == current_name:
+        if name == current_name or is_currency_name(name) or rec.get("market") == CURRENCY_MARKET:
             continue
         try:
             avg = float(rec.get("avg_cost", 0) or 0)
@@ -1402,7 +1475,49 @@ def parse_form_inputs():
     }
 
 
+def parse_currency_inputs():
+    try:
+        def to_float_str(val, default=0.0):
+            text = str(val).strip().replace(" ", "").replace(",", "")
+            if not text:
+                return default
+            return float(text)
+
+        avg_cost = to_float_str(avg_cost_var.get(), 0.0)
+        usd_hold = to_float_str(num_shares_var.get(), 0.0)
+        if avg_cost < 0 or usd_hold < 0:
+            raise ValueError()
+    except ValueError:
+        messagebox.showerror(
+            "Input error",
+            "Use non-negative numbers (FX avg / USD holdings).",
+        )
+        return None
+
+    return {
+        "avg_cost": avg_cost,
+        "usd_hold": usd_hold,
+    }
+
+
 def fill_form_from_record(name):
+    if is_currency_name(name):
+        rec = stock_data.get(name, default_record(CURRENCY_MARKET))
+        name_var.set(name)
+        market_var.set(CURRENCY_MARKET)
+        avg_cost_var.set("" if rec["avg_cost"] == "" else format_input(rec["avg_cost"], "FX", decimals=0))
+        fx_hold = rec.get("fx_hold_usd", rec.get("num_shares", 0))
+        num_shares_var.set("" if fx_hold == "" else format_input(fx_hold, "KR", is_money=False, decimals=0))
+        max_volume_var.set("")
+        fx_rate_var.set(format_input(GLOBAL_FX_RATE, "KR", decimals=2))
+        latest_trading_day_var.set("")
+        buy_gear_var.set(3.0)
+        sell_gear_var.set(3.0)
+        manual_rescue_var.set("AUTO")
+        update_buy_gear_label()
+        update_sell_gear_label()
+        return
+
     rec = stock_data.get(name, default_record())
     name_var.set(name)
     market_var.set(rec.get("market", "KR"))
@@ -1439,15 +1554,52 @@ def clear_form_fields():
     update_market_state()
 
 
+def set_currency_view(is_currency):
+    if is_currency:
+        avg_cost_label.config(text="FX Avg Cost (₩ per $)")
+        num_shares_label.config(text="USD Holdings ($)")
+        units_label.grid_remove()
+        units_value_label.grid_remove()
+        max_volume_label.grid_remove()
+        max_volume_entry.grid_remove()
+        market_frame.grid_remove()
+        fx_frame.grid_remove()
+        latest_frame.grid_remove()
+        gear_frame.grid_remove()
+        buy_frame.grid_remove()
+        sell_frame.grid_remove()
+        rescue_frame.grid_remove()
+        recommend.grid_remove()
+        fx_panel.grid()
+    else:
+        num_shares_label.config(text="Number of Stocks")
+        units_label.grid()
+        units_value_label.grid()
+        max_volume_label.grid()
+        max_volume_entry.grid()
+        market_frame.grid()
+        fx_frame.grid()
+        latest_frame.grid()
+        gear_frame.grid()
+        buy_frame.grid()
+        sell_frame.grid()
+        rescue_frame.grid()
+        fx_panel.grid_remove()
+        recommend.grid()
+        update_market_state()
+
+
 def on_select_stock(selected=None):
     choice = selected or name_choice_var.get()
     if not choice:
         clear_form_fields()
         return
     name_choice_var.set(choice)
+    set_currency_view(is_currency_name(choice))
     fill_form_from_record(choice)
     update_display()
-    update_apply_status_display(choice)
+    if not is_currency_name(choice):
+        update_apply_status_display(choice)
 
 
 def refresh_name_list(selected=None):
@@ -1457,8 +1609,12 @@ def refresh_name_list(selected=None):
         for nm, mk in DEFAULT_NAMES:
             stock_order.append(nm)
             stock_data[nm] = default_record(mk)
+    currency_label_added = False
     for nm in stock_order:
         rec = stock_data.get(nm, default_record())
+        if is_currency_name(nm) and not currency_label_added:
+            ttk.Label(name_radio_frame, text="Currency").pack(anchor="w", pady=(6, 0))
+            currency_label_added = True
         lbl = f"{nm} ({rec.get('market','KR')})"
         ttk.Radiobutton(
             name_radio_frame,
@@ -1509,6 +1665,9 @@ def on_add_new():
     new_name = new_name.strip()
     if not new_name:
         return
+    if is_currency_name(new_name):
+        messagebox.showerror("Reserved name", f"'{CURRENCY_NAME}' is reserved for the FX panel.")
+        return
     market_choice = prompt_market_choice()
     if not market_choice:
         return
@@ -1525,6 +1684,9 @@ def on_delete_stock():
     if not selected:
         messagebox.showerror("No selection", "Select a stock to delete.")
         return
+    if is_currency_name(selected):
+        messagebox.showerror("No selection", "Currency panel cannot be deleted.")
+        return
     if selected in stock_data:
         del stock_data[selected]
     if selected in stock_order:
@@ -1536,12 +1698,31 @@ def on_delete_stock():
 
 def on_save():
     global GLOBAL_FX_RATE
-    parsed = parse_form_inputs()
-    if parsed is None:
-        return
     selected = name_choice_var.get()
     if not selected:
         messagebox.showerror("No selection", "Select or add a stock before saving.")
+        return
+    if is_currency_name(selected):
+        parsed_fx = parse_currency_inputs()
+        if parsed_fx is None:
+            return
+        rec = stock_data.get(selected, default_record(CURRENCY_MARKET))
+        rec.update(
+            {
+                "avg_cost": parsed_fx["avg_cost"],
+                "num_shares": 0,
+                "fx_hold_usd": parsed_fx["usd_hold"],
+                "market": CURRENCY_MARKET,
+            }
+        )
+        stock_data[selected] = rec
+        write_data_file()
+        update_display()
+        messagebox.showinfo("Saved", f"Saved FX data for '{selected}'.")
+        return
+
+    parsed = parse_form_inputs()
+    if parsed is None:
         return
 
     rec = stock_data.get(selected, default_record(parsed["market"]))
@@ -1580,13 +1761,107 @@ def on_save():
 
 
 def update_display(force_recommendation=False):
+    current_name = name_var.get().strip() or name_choice_var.get()
+    if not current_name:
+        return
+    if is_currency_name(current_name):
+        parsed_fx = parse_currency_inputs()
+        if parsed_fx is None:
+            return
+        rec = stock_data.get(current_name, default_record(CURRENCY_MARKET))
+        current_fx = float(rec.get("current_price", 0) or GLOBAL_FX_RATE)
+        avg_cost = float(parsed_fx.get("avg_cost", 0) or 0)
+        usd_hold = float(parsed_fx.get("usd_hold", 0) or 0)
+        fx_pnl_pct = ((current_fx - avg_cost) / avg_cost * 100.0) if avg_cost > 0 else 0.0
+        value_krw = usd_hold * current_fx if usd_hold > 0 and current_fx > 0 else 0.0
+        krw_pnl = (current_fx - avg_cost) * usd_hold if avg_cost > 0 and usd_hold > 0 else 0.0
+
+        if avg_cost > 0:
+            if fx_pnl_pct <= -2.0:
+                status_label = "Green Light (USD cheap)"
+                status_color = "#2e7d32"
+            elif fx_pnl_pct <= 2.0:
+                status_label = "Yellow Light (neutral)"
+                status_color = "#f9a825"
+            elif fx_pnl_pct <= 5.0:
+                status_label = "Red Light (USD expensive)"
+                status_color = "#c62828"
+            else:
+                status_label = "Premium Zone (very expensive)"
+                status_color = "#6a1b9a"
+            fx_status_var.set(f"FX status: {status_label} ({fx_pnl_pct:+.1f}%)")
+        else:
+            status_label = "N/A"
+            status_color = "#616161"
+            fx_status_var.set("FX status: N/A (set FX avg cost)")
+
+        fx_status_label.configure(foreground=status_color)
+
+        tier_prices = []
+        tier_lines = []
+        if avg_cost > 0:
+            for tier in (3.0, 5.0, 7.0):
+                price = avg_cost * (1 + tier / 100)
+                tier_prices.append(price)
+                tier_lines.append(f"Tier +{tier:.0f}%: {fmt_or_na(price, 'FX')}")
+
+        fx_avg_10d = float(rec.get("fx_avg_10d", 0) or 0)
+        fx_slope_10d = float(rec.get("fx_slope_10d", 0) or 0)
+        info_lines = [
+            f"FX current: {fmt_or_na(current_fx, 'FX')}",
+            f"FX avg cost: {fmt_or_na(avg_cost, 'FX')}",
+            f"USD holdings: {usd_hold:,.0f}" if usd_hold > 0 else "USD holdings: 0",
+        ]
+        if avg_cost > 0:
+            info_lines.append(f"FX vs avg: {fx_pnl_pct:+.2f}%")
+        if fx_avg_10d > 0:
+            info_lines.append(f"FX 10d avg: {fmt_or_na(fx_avg_10d, 'FX')}")
+            info_lines.append(f"FX 10d slope: {fx_slope_10d:+.2f}%")
+        if krw_pnl != 0:
+            info_lines.append(f"KRW change: {fmt_or_na(krw_pnl, 'KR')}")
+        if value_krw > 0:
+            info_lines.append(f"KRW value: {fmt_or_na(value_krw, 'KR')}")
+        if tier_lines:
+            info_lines.extend(tier_lines)
+        if rec.get("last_update"):
+            info_lines.append(f"Last update: {rec['last_update']}")
+        fx_info_var.set("\n".join(info_lines))
+
+        result_lines = [
+            f"Name: {current_name} (USD/KRW)",
+            f"USD holdings: {usd_hold:,.0f}" if usd_hold > 0 else "USD holdings: 0",
+            f"FX avg cost: {fmt_or_na(avg_cost, 'FX')}",
+            f"FX current: {fmt_or_na(current_fx, 'FX')}",
+        ]
+        if avg_cost > 0:
+            result_lines.append(f"FX status: {status_label} ({fx_pnl_pct:+.1f}%)")
+        if avg_cost > 0:
+            result_lines.append(f"FX vs avg: {fx_pnl_pct:+.2f}%")
+        else:
+            result_lines.append("FX vs avg: N/A (set avg cost)")
+        if fx_avg_10d > 0:
+            result_lines.append(f"FX 10d avg: {fmt_or_na(fx_avg_10d, 'FX')}")
+            result_lines.append(f"FX 10d slope: {fx_slope_10d:+.2f}%")
+        if krw_pnl != 0:
+            result_lines.append(f"KRW change: {fmt_or_na(krw_pnl, 'KR')}")
+        if value_krw > 0:
+            result_lines.append(f"KRW value: {fmt_or_na(value_krw, 'KR')}")
+        if rec.get("last_update"):
+            result_lines.append(f"Last update: {rec['last_update']}")
+        result_var.set("\n".join(result_lines))
+
+        plot_currency_levels(
+            name=current_name,
+            avg_cost=avg_cost,
+            current_price=current_fx,
+            tier_prices=tier_prices,
+        )
+        return
+
     parsed = parse_form_inputs()
     if parsed is None:
         return
 
-    current_name = name_var.get().strip() or name_choice_var.get()
-    if not current_name:
-        return
     rec = stock_data.get(current_name, default_record(parsed["market"]))
     data = compute_state(parsed, rec, current_name)
 
@@ -1780,6 +2055,9 @@ def apply_recommendation():
     if not stock_name:
         messagebox.showinfo("Recommendation", "No stock selected.")
         return
+    if is_currency_name(stock_name):
+        messagebox.showinfo("Recommendation", "FX panel does not use stock perks.")
+        return
     state = get_rec_state(stock_name)
     perk = state.get("latest")
     if not perk:
@@ -1828,6 +2106,9 @@ def cancel_recommendation():
     if not stock_name:
         messagebox.showinfo("Recommendation", "No stock selected.")
         return
+    if is_currency_name(stock_name):
+        messagebox.showinfo("Recommendation", "FX panel does not use stock perks.")
+        return
     base_buy, base_sell = get_base_gears()
     buy_gear_var.set(round(base_buy, 1))
     sell_gear_var.set(round(base_sell, 1))
@@ -1849,7 +2130,100 @@ def refresh_recommendation():
     if not stock_name:
         messagebox.showinfo("Recommendation", "No stock selected.")
         return
+    if is_currency_name(stock_name):
+        messagebox.showinfo("Recommendation", "FX panel does not use stock perks.")
+        return
     update_display(force_recommendation=True)
+
+
+def plot_currency_levels(
+    name,
+    avg_cost,
+    current_price,
+    tier_prices,
+):
+    fig.clear()
+    ax = fig.add_subplot(111)
+    x_start, x_end = 0.0, 1.0
+
+    fmt_val = lambda val: fmt_or_na(val, "FX")
+    levels = []
+
+    if current_price and current_price > 0:
+        levels.append(("FX Now", current_price, "#333333", "--", "", fmt_val(current_price), 2.0))
+    if avg_cost and avg_cost > 0:
+        levels.append(("FX Avg", avg_cost, "black", "-", "", fmt_val(avg_cost), 2.6))
+    if tier_prices:
+        colors = ["#0a8f08", "#0066cc", "#7b1fa2"]
+        for idx, price in enumerate(tier_prices):
+            label = f"Tier +{[3, 5, 7][idx]}%"
+            levels.append((label, price, colors[idx % len(colors)], "-", "", fmt_val(price), 2.4))
+
+    for label, y, color, style, left_text, right_text, lw in levels:
+        ax.plot([x_start, x_end], [y, y], color=color, linestyle=style, linewidth=lw)
+        left_label = f"{label} ({left_text})" if left_text else label
+        ax.text(
+            x_start + 0.01,
+            y,
+            left_label,
+            va="center",
+            ha="left",
+            fontsize=9,
+            color=color,
+            backgroundcolor="white",
+        )
+        ax.text(
+            x_end - 0.01,
+            y,
+            right_text,
+            va="center",
+            ha="right",
+            fontsize=9,
+            color=color,
+            backgroundcolor="white",
+        )
+
+    def draw_gap(x, base, other, color):
+        if not base or not other or base <= 0 or other <= 0 or base == other:
+            return
+        ax.plot([x, x], [base, other], color=color, linestyle="--", linewidth=1.0)
+        pct = (other - base) / base * 100.0
+        ax.text(
+            x + 0.01,
+            (base + other) / 2,
+            f"{pct:+.1f}%",
+            va="center",
+            ha="left",
+            fontsize=9,
+            color=color,
+        )
+
+    if avg_cost and avg_cost > 0 and current_price and current_price > 0:
+        draw_gap(0.55, avg_cost, current_price, "#616161")
+
+    if avg_cost and avg_cost > 0 and tier_prices:
+        draw_gap(0.65, avg_cost, tier_prices[0], "#0066cc")
+        if len(tier_prices) > 1:
+            draw_gap(0.75, tier_prices[0], tier_prices[1], "#0066cc")
+        if len(tier_prices) > 2:
+            draw_gap(0.85, tier_prices[1], tier_prices[2], "#0066cc")
+
+    if levels:
+        prices = [lvl[1] for lvl in levels]
+        ymin = min(prices)
+        ymax = max(prices)
+        pad = (ymax - ymin) * 0.1 if ymax != ymin else max(1, ymax * 0.1)
+        ax.set_ylim(ymin - pad, ymax + pad)
+
+    ax.set_xlim(x_start, x_end)
+    ax.set_xticks([])
+    ax.set_title(name or "")
+    ax.set_ylabel("FX (₩ per $)")
+    ax.grid(False)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["bottom"].set_visible(False)
+    canvas.draw()
 
 
 def plot_levels(
@@ -2054,6 +2428,9 @@ def update_sell_gear_label(*args):
 
 
 def update_market_state():
+    if is_currency_name(get_current_stock_name()):
+        avg_cost_label.config(text="FX Avg Cost (₩ per $)")
+        return
     # Always show FX and keep it editable for both KR and US; for KR it still stores a value.
     fx_entry.state(["!disabled"])
     if not fx_rate_var.get():
@@ -2130,6 +2507,11 @@ apply_btn = None
 cancel_btn = None
 apply_status_var = tk.StringVar()
 ratio_var = tk.StringVar()
+fx_status_var = tk.StringVar()
+fx_info_var = tk.StringVar()
+
+buy_gear_var.trace_add("write", lambda *_: update_buy_gear_label())
+sell_gear_var.trace_add("write", lambda *_: update_sell_gear_label())
 
 form = ttk.Frame(main)
 form.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
@@ -2145,20 +2527,20 @@ avg_cost_label.grid(row=1, column=0, sticky="e", padx=4, pady=4)
 ttk.Entry(form, textvariable=avg_cost_var, width=16).grid(
     row=1, column=1, sticky="w", padx=4, pady=4
 )
-ttk.Label(form, text="Number of Stocks").grid(row=2, column=0, sticky="e", padx=4, pady=4)
-ttk.Entry(form, textvariable=num_shares_var, width=16).grid(
-    row=2, column=1, sticky="w", padx=4, pady=4
-)
+num_shares_label = ttk.Label(form, text="Number of Stocks")
+num_shares_label.grid(row=2, column=0, sticky="e", padx=4, pady=4)
+num_shares_entry = ttk.Entry(form, textvariable=num_shares_var, width=16)
+num_shares_entry.grid(row=2, column=1, sticky="w", padx=4, pady=4)
 
-ttk.Label(form, text="stock/deployed/total").grid(row=3, column=0, sticky="e", padx=4, pady=4)
-ttk.Label(form, textvariable=units_held_var).grid(
-    row=3, column=1, sticky="w", padx=4, pady=4
-)
+units_label = ttk.Label(form, text="stock/deployed/total")
+units_label.grid(row=3, column=0, sticky="e", padx=4, pady=4)
+units_value_label = ttk.Label(form, textvariable=units_held_var)
+units_value_label.grid(row=3, column=1, sticky="w", padx=4, pady=4)
 
-ttk.Label(form, text="Max Volume (₩)").grid(row=4, column=0, sticky="e", padx=4, pady=4)
-ttk.Entry(form, textvariable=max_volume_var, width=16).grid(
-    row=4, column=1, sticky="w", padx=4, pady=4
-)
+max_volume_label = ttk.Label(form, text="Max Volume (₩)")
+max_volume_label.grid(row=4, column=0, sticky="e", padx=4, pady=4)
+max_volume_entry = ttk.Entry(form, textvariable=max_volume_var, width=16)
+max_volume_entry.grid(row=4, column=1, sticky="w", padx=4, pady=4)
 
 market_frame = ttk.Frame(form)
 market_frame.grid(row=5, column=0, columnspan=2, sticky="w", padx=4, pady=4)
@@ -2434,6 +2816,16 @@ apply_status_label = tk.Label(
     fg="#b71c1c",
 )
 apply_status_label.grid(row=12, column=0, sticky="ew", padx=6, pady=(0, 6))
+
+fx_panel = ttk.LabelFrame(main, text="Dollar (FX)")
+fx_panel.grid(row=0, column=2, sticky="n", padx=(12, 0))
+fx_panel.columnconfigure(0, weight=1)
+fx_status_label = ttk.Label(fx_panel, textvariable=fx_status_var, justify="left")
+fx_status_label.grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
+ttk.Label(fx_panel, textvariable=fx_info_var, justify="left").grid(
+    row=1, column=0, sticky="w", padx=6, pady=(0, 6)
+)
+fx_panel.grid_remove()
 
 main.rowconfigure(0, weight=1)
 main.columnconfigure(1, weight=1)
