@@ -8,7 +8,6 @@
     "gear_max": 5.0,
     "description": "Point-based perk system with mutual exclusion and short-term momentum"
   },
-  
   "exclusive_groups": {
     "volatility_short": {
       "description": "Short-term volatility (1-3 day ATR)",
@@ -73,7 +72,6 @@
       "ui_type": "radio"
     }
   },
-  
   "perks": [
     {
       "id": "warmonger",
@@ -87,7 +85,8 @@
       "auto_trigger": "roc_1d > 8",
       "description": "Strong single-day surge (>8%), aggressive entry",
       "icon": "⚔️",
-      "note": "Catches TODAY's explosive move"
+      "note": "Catches TODAY's explosive move",
+      "activation": true
     },
     {
       "id": "battle_hunger",
@@ -101,7 +100,8 @@
       "auto_trigger": "4 < roc_1d <= 8",
       "description": "Moderate single-day pop (4-8%), tactical entry",
       "icon": "🗡️",
-      "note": "Catches TODAY's strong move"
+      "note": "Catches TODAY's strong move",
+      "activation": true
     },
     {
       "id": "quiet_day",
@@ -115,7 +115,8 @@
       "auto_trigger": "-4 <= roc_1d <= 4",
       "description": "Normal daily movement",
       "icon": "😴",
-      "note": "TODAY is calm"
+      "note": "TODAY is calm",
+      "activation": true
     },
     {
       "id": "daily_retreat",
@@ -129,7 +130,8 @@
       "auto_trigger": "-8 <= roc_1d < -4",
       "description": "Moderate single-day drop (-4 to -8%)",
       "icon": "🚶",
-      "note": "TODAY is weak"
+      "note": "TODAY is weak",
+      "activation": true
     },
     {
       "id": "daily_rout",
@@ -143,9 +145,9 @@
       "auto_trigger": "roc_1d < -8",
       "description": "Strong single-day crash (<-8%), caution",
       "icon": "🏃",
-      "note": "TODAY is brutal"
+      "note": "TODAY is brutal",
+      "activation": true
     },
-    
     {
       "id": "fresh_momentum",
       "name": "Fresh Momentum",
@@ -158,7 +160,8 @@
       "auto_trigger": "roc_3d > 10",
       "description": "3-day surge (>10%), ride the wave",
       "icon": "🌊",
-      "note": "Strong 3-day momentum"
+      "note": "Strong 3-day momentum",
+      "activation": true
     },
     {
       "id": "steady_3d",
@@ -172,7 +175,8 @@
       "auto_trigger": "-5 <= roc_3d <= 10",
       "description": "Normal 3-day range",
       "icon": "📊",
-      "note": "Neutral 3-day"
+      "note": "Neutral 3-day",
+      "activation": true
     },
     {
       "id": "fading_3d",
@@ -186,9 +190,9 @@
       "auto_trigger": "roc_3d < -5",
       "description": "3-day weakness (<-5%), defensive",
       "icon": "📉",
-      "note": "Weak 3-day momentum"
+      "note": "Weak 3-day momentum",
+      "activation": true
     },
-    
     {
       "id": "turbulent_short",
       "name": "Turbulent Short",
@@ -201,7 +205,8 @@
       "auto_trigger": "atr_3d_pct > 4.0",
       "description": "High 3-day volatility (>4% ATR)",
       "icon": "🌪️",
-      "note": "Last 3 days are choppy"
+      "note": "Last 3 days are choppy",
+      "activation": true
     },
     {
       "id": "calm_short",
@@ -215,9 +220,9 @@
       "auto_trigger": "atr_3d_pct <= 4.0",
       "description": "Low 3-day volatility (≤4% ATR)",
       "icon": "😌",
-      "note": "Last 3 days are calm"
+      "note": "Last 3 days are calm",
+      "activation": true
     },
-    
     {
       "id": "gentle_breeze",
       "name": "Gentle Breeze",
@@ -230,7 +235,8 @@
       "auto_trigger": "atr_5d_pct < 2.0",
       "description": "Ultra-calm 5-day (ATR < 2%)",
       "icon": "🍃",
-      "note": "5-day smoothed volatility"
+      "note": "5-day smoothed volatility",
+      "activation": true
     },
     {
       "id": "steady_eddie",
@@ -244,7 +250,8 @@
       "auto_trigger": "2.0 <= atr_5d_pct < 4.0",
       "description": "Normal 5-day volatility (2-4%)",
       "icon": "📊",
-      "note": "5-day smoothed volatility"
+      "note": "5-day smoothed volatility",
+      "activation": true
     },
     {
       "id": "wild_mustang",
@@ -258,7 +265,8 @@
       "auto_trigger": "4.0 <= atr_5d_pct < 6.0",
       "description": "Elevated 5-day volatility (4-6%)",
       "icon": "🐎",
-      "note": "5-day smoothed volatility"
+      "note": "5-day smoothed volatility",
+      "activation": true
     },
     {
       "id": "hard_shaker",
@@ -272,7 +280,8 @@
       "auto_trigger": "6.0 <= atr_5d_pct < 8.0",
       "description": "High 5-day volatility (6-8%)",
       "icon": "📳",
-      "note": "5-day smoothed volatility"
+      "note": "5-day smoothed volatility",
+      "activation": true
     },
     {
       "id": "crazy_dancer",
@@ -286,9 +295,9 @@
       "auto_trigger": "atr_5d_pct >= 8.0",
       "description": "Extreme 5-day volatility (≥8%)",
       "icon": "💃",
-      "note": "5-day smoothed volatility"
+      "note": "5-day smoothed volatility",
+      "activation": true
     },
-    
     {
       "id": "rocket_fuel",
       "name": "Rocket Fuel",
@@ -301,7 +310,8 @@
       "auto_trigger": "roc_5d > 15",
       "description": "Strong 5-day rally (>15%)",
       "icon": "🚀",
-      "note": "5-day trend"
+      "note": "5-day trend",
+      "activation": true
     },
     {
       "id": "tailwind",
@@ -315,7 +325,8 @@
       "auto_trigger": "8 < roc_5d <= 15",
       "description": "Mild 5-day uptrend (8-15%)",
       "icon": "💨",
-      "note": "5-day trend"
+      "note": "5-day trend",
+      "activation": true
     },
     {
       "id": "sideways_shuffle",
@@ -329,7 +340,8 @@
       "auto_trigger": "-5 <= roc_5d <= 8",
       "description": "Range-bound 5-day (-5 to +8%)",
       "icon": "↔️",
-      "note": "5-day trend"
+      "note": "5-day trend",
+      "activation": true
     },
     {
       "id": "headwind",
@@ -343,7 +355,8 @@
       "auto_trigger": "-15 <= roc_5d < -5",
       "description": "Mild 5-day downtrend (-5 to -15%)",
       "icon": "🌪️",
-      "note": "5-day trend"
+      "note": "5-day trend",
+      "activation": true
     },
     {
       "id": "falling_knife",
@@ -357,9 +370,9 @@
       "auto_trigger": "roc_5d < -15",
       "description": "Steep 5-day drop (<-15%)",
       "icon": "🔪",
-      "note": "5-day trend"
+      "note": "5-day trend",
+      "activation": true
     },
-    
     {
       "id": "empty_barracks",
       "name": "Empty Barracks",
@@ -371,7 +384,8 @@
       "auto": true,
       "auto_trigger": "deployed_pct < 10",
       "description": "Almost no exposure (<10%)",
-      "icon": "🏚️"
+      "icon": "🏚️",
+      "activation": true
     },
     {
       "id": "scout_team",
@@ -384,7 +398,8 @@
       "auto": true,
       "auto_trigger": "10 <= deployed_pct < 30",
       "description": "Light position (10-30%)",
-      "icon": "🔭"
+      "icon": "🔭",
+      "activation": true
     },
     {
       "id": "standard_formation",
@@ -397,7 +412,8 @@
       "auto": true,
       "auto_trigger": "30 <= deployed_pct < 60",
       "description": "Normal deployment (30-60%)",
-      "icon": "⚔️"
+      "icon": "⚔️",
+      "activation": true
     },
     {
       "id": "heavy_artillery",
@@ -410,7 +426,8 @@
       "auto": true,
       "auto_trigger": "60 <= deployed_pct < 80",
       "description": "Heavy position (60-80%)",
-      "icon": "🎯"
+      "icon": "🎯",
+      "activation": true
     },
     {
       "id": "all_in_assault",
@@ -423,7 +440,8 @@
       "auto": true,
       "auto_trigger": "80 <= deployed_pct < 95",
       "description": "Very heavy (80-95%)",
-      "icon": "💥"
+      "icon": "💥",
+      "activation": true
     },
     {
       "id": "maxed_out",
@@ -436,9 +454,9 @@
       "auto": true,
       "auto_trigger": "deployed_pct >= 95",
       "description": "Emergency (≥95%)",
-      "icon": "🚨"
+      "icon": "🚨",
+      "activation": true
     },
-    
     {
       "id": "deep_underwater",
       "name": "Deep Underwater",
@@ -450,7 +468,8 @@
       "auto": true,
       "auto_trigger": "pnl_pct < -15",
       "description": "Heavy loss (<-15%)",
-      "icon": "🌊"
+      "icon": "🌊",
+      "activation": true
     },
     {
       "id": "treading_water",
@@ -463,7 +482,8 @@
       "auto": true,
       "auto_trigger": "-5 <= pnl_pct < 5",
       "description": "Near breakeven (-5 to +5%)",
-      "icon": "🏊"
+      "icon": "🏊",
+      "activation": true
     },
     {
       "id": "green_shoots",
@@ -476,7 +496,8 @@
       "auto": true,
       "auto_trigger": "5 <= pnl_pct < 15",
       "description": "Small profit (5-15%)",
-      "icon": "🌱"
+      "icon": "🌱",
+      "activation": true
     },
     {
       "id": "cash_cow",
@@ -489,9 +510,9 @@
       "auto": true,
       "auto_trigger": "pnl_pct >= 15",
       "description": "Big profit (≥15%)",
-      "icon": "🐄"
+      "icon": "🐄",
+      "activation": true
     },
-    
     {
       "id": "fx_green_light",
       "name": "FX Green Light",
@@ -504,7 +525,8 @@
       "auto_trigger": "fx_vs_avg < -2.0",
       "description": "USD cheap (<-2%), buy opportunity",
       "icon": "🟢",
-      "note": "US stocks only"
+      "note": "US stocks only",
+      "activation": true
     },
     {
       "id": "fx_yellow_light",
@@ -518,7 +540,8 @@
       "auto_trigger": "-2.0 <= fx_vs_avg <= 2.0",
       "description": "FX neutral (-2 to +2%)",
       "icon": "🟡",
-      "note": "US stocks only"
+      "note": "US stocks only",
+      "activation": true
     },
     {
       "id": "fx_red_light",
@@ -532,7 +555,8 @@
       "auto_trigger": "2.0 < fx_vs_avg <= 5.0",
       "description": "USD expensive (+2 to +5%), sell profit",
       "icon": "🔴",
-      "note": "US stocks only"
+      "note": "US stocks only",
+      "activation": true
     },
     {
       "id": "fx_premium_zone",
@@ -546,9 +570,9 @@
       "auto_trigger": "fx_vs_avg > 5.0",
       "description": "Very strong dollar (>+5%), urgent sell",
       "icon": "💵",
-      "note": "US stocks only"
+      "note": "US stocks only",
+      "activation": true
     },
-    
     {
       "id": "raging_bull",
       "name": "Raging Bull",
@@ -559,7 +583,8 @@
       "sell_points": 10,
       "auto": false,
       "description": "Strong bull market globally",
-      "icon": "🐂"
+      "icon": "🐂",
+      "activation": true
     },
     {
       "id": "quiet_bull",
@@ -571,7 +596,8 @@
       "sell_points": 4,
       "auto": false,
       "description": "Mild bull market",
-      "icon": "📈"
+      "icon": "📈",
+      "activation": true
     },
     {
       "id": "neutral_zone",
@@ -583,7 +609,8 @@
       "sell_points": 0,
       "auto": false,
       "description": "Unclear market direction",
-      "icon": "⚪"
+      "icon": "⚪",
+      "activation": true
     },
     {
       "id": "cautious_bear",
@@ -595,7 +622,8 @@
       "sell_points": -4,
       "auto": false,
       "description": "Mild bear market",
-      "icon": "📉"
+      "icon": "📉",
+      "activation": true
     },
     {
       "id": "savage_bear",
@@ -607,85 +635,139 @@
       "sell_points": -10,
       "auto": false,
       "description": "Panic selling, crisis mode",
-      "icon": "🐻"
+      "icon": "🐻",
+      "activation": true
     },
-    
     {
-      "id": "high_conviction",
-      "name": "High Conviction",
+      "id": "conviction_very_high",
+      "name": "Titan Resolve",
       "category": "conviction",
       "exclusive_group": "conviction_level",
-      "tier": "moderate",
+      "tier": "major",
       "buy_points": -7,
       "sell_points": 7,
       "auto": false,
-      "description": "Strong thesis, aggressive",
-      "icon": "💪"
+      "description": "Very high conviction; aggressive buy and patient sell.",
+      "icon": "🔥",
+      "activation": true
     },
     {
-      "id": "neutral_conviction",
-      "name": "Neutral Conviction",
+      "id": "conviction_high",
+      "name": "Steel Backbone",
+      "category": "conviction",
+      "exclusive_group": "conviction_level",
+      "tier": "moderate",
+      "buy_points": -3,
+      "sell_points": 3,
+      "auto": false,
+      "description": "High conviction; slight bias to add and hold.",
+      "icon": "⚡",
+      "activation": true
+    },
+    {
+      "id": "conviction_neutral",
+      "name": "Clear Mind",
       "category": "conviction",
       "exclusive_group": "conviction_level",
       "tier": "minor",
       "buy_points": 0,
       "sell_points": 0,
       "auto": false,
-      "description": "Normal confidence",
-      "icon": "😐"
+      "description": "Neutral conviction; default posture.",
+      "icon": "😐",
+      "activation": true
     },
     {
-      "id": "low_conviction",
-      "name": "Low Conviction",
+      "id": "conviction_low",
+      "name": "Light Doubt",
       "category": "conviction",
       "exclusive_group": "conviction_level",
-      "tier": "moderate",
+      "tier": "minor",
+      "buy_points": 3,
+      "sell_points": -3,
+      "auto": false,
+      "description": "Low conviction; cautious buy, quicker sell.",
+      "icon": "🤔",
+      "activation": true
+    },
+    {
+      "id": "conviction_very_low",
+      "name": "Red Alert",
+      "category": "conviction",
+      "exclusive_group": "conviction_level",
+      "tier": "major",
       "buy_points": 7,
       "sell_points": -7,
       "auto": false,
-      "description": "Uncertain, defensive",
-      "icon": "🤷"
+      "description": "Very low conviction; defensive posture.",
+      "icon": "🚨",
+      "activation": true
     },
-    
     {
-      "id": "diamond_hands",
-      "name": "Diamond Hands",
+      "id": "tight_hold",
+      "name": "Tight Hold",
       "category": "conviction",
       "exclusive_group": "hand_type",
       "tier": "minor",
       "buy_points": 0,
       "sell_points": 5,
       "auto": false,
-      "description": "Hold strong, higher targets (FIXED)",
+      "description": "Tight hold; higher sell targets.",
       "icon": "💎",
-      "note": "CORRECTED: Positive sell points = higher targets = harder to sell"
+      "activation": true
     },
     {
-      "id": "normal_hands",
-      "name": "Normal Hands",
-      "category": "conviction",
-      "exclusive_group": "hand_type",
-      "tier": "minor",
-      "buy_points": 0,
-      "sell_points": 0,
-      "auto": false,
-      "description": "Default behavior",
-      "icon": "🤝"
-    },
-    {
-      "id": "paper_hands",
-      "name": "Paper Hands",
+      "id": "loose_hold",
+      "name": "Loose Hold",
       "category": "conviction",
       "exclusive_group": "hand_type",
       "tier": "minor",
       "buy_points": 0,
       "sell_points": -5,
       "auto": false,
-      "description": "Sell quick, lower targets (FIXED)",
+      "description": "Loose hold; lower sell targets.",
       "icon": "📄",
-      "note": "CORRECTED: Negative sell points = lower targets = easier to sell"
+      "activation": true
     },
-    
+    {
+      "id": "neutral_hands",
+      "name": "Neutral Hands",
+      "category": "conviction",
+      "exclusive_group": "hand_type",
+      "tier": "minor",
+      "buy_points": 0,
+      "sell_points": 0,
+      "auto": false,
+      "description": "Neutral hold; default behavior.",
+      "icon": "🤝",
+      "activation": true
+    },
+    {
+      "id": "easy_draw",
+      "name": "Easy Draw",
+      "category": "conviction",
+      "exclusive_group": "hand_type",
+      "tier": "minor",
+      "buy_points": -5,
+      "sell_points": 0,
+      "auto": false,
+      "description": "Easy to add; more willing to buy.",
+      "icon": "🏹",
+      "activation": true
+    },
+    {
+      "id": "hard_draw",
+      "name": "Hard Draw",
+      "category": "conviction",
+      "exclusive_group": "hand_type",
+      "tier": "minor",
+      "buy_points": 5,
+      "sell_points": 0,
+      "auto": false,
+      "description": "Hard to add; more selective buying.",
+      "icon": "🛡️",
+      "activation": true
+    },
     {
       "id": "battle_weary",
       "name": "Battle Weary",
@@ -696,9 +778,9 @@
       "sell_points": 3,
       "auto": false,
       "description": "Tired after many rescues (can stack)",
-      "icon": "😰"
+      "icon": "😰",
+      "activation": true
     },
-    
     {
       "id": "earnings_week",
       "name": "Earnings Week",
@@ -709,7 +791,8 @@
       "sell_points": 5,
       "auto": false,
       "description": "Volatility spike expected (can stack)",
-      "icon": "📊"
+      "icon": "📊",
+      "activation": true
     },
     {
       "id": "beat_street",
@@ -721,7 +804,8 @@
       "sell_points": 12,
       "auto": false,
       "description": "Earnings beat, momentum surge",
-      "icon": "🎯"
+      "icon": "🎯",
+      "activation": false
     },
     {
       "id": "missed_target",
@@ -733,7 +817,8 @@
       "sell_points": -8,
       "auto": false,
       "description": "Earnings miss, selloff",
-      "icon": "❌"
+      "icon": "❌",
+      "activation": false
     },
     {
       "id": "product_launch",
@@ -745,7 +830,8 @@
       "sell_points": 5,
       "auto": false,
       "description": "New product catalyst (can stack)",
-      "icon": "🚀"
+      "icon": "🚀",
+      "activation": true
     },
     {
       "id": "analyst_upgrade",
@@ -757,7 +843,8 @@
       "sell_points": 4,
       "auto": false,
       "description": "Street turning bullish (can stack)",
-      "icon": "⬆️"
+      "icon": "⬆️",
+      "activation": true
     },
     {
       "id": "analyst_downgrade",
@@ -769,9 +856,9 @@
       "sell_points": -4,
       "auto": false,
       "description": "Street turning bearish (can stack)",
-      "icon": "⬇️"
+      "icon": "⬇️",
+      "activation": true
     },
-    
     {
       "id": "black_swan",
       "name": "Black Swan",
@@ -782,7 +869,8 @@
       "sell_points": -15,
       "auto": false,
       "description": "Extreme crisis, safety first (can stack)",
-      "icon": "🦢"
+      "icon": "🦢",
+      "activation": true
     },
     {
       "id": "fomo_frenzy",
@@ -794,7 +882,8 @@
       "sell_points": 15,
       "auto": false,
       "description": "Euphoria peak, take profit (can stack)",
-      "icon": "🎪"
+      "icon": "🎪",
+      "activation": true
     },
     {
       "id": "tax_loss_season",
@@ -806,7 +895,8 @@
       "sell_points": -3,
       "auto": false,
       "description": "December selling pressure (can stack)",
-      "icon": "📅"
+      "icon": "📅",
+      "activation": false
     },
     {
       "id": "fed_pivot",
@@ -818,7 +908,8 @@
       "sell_points": 7,
       "auto": false,
       "description": "Rate cuts, liquidity boost",
-      "icon": "💰"
+      "icon": "💰",
+      "activation": false
     },
     {
       "id": "fed_hammer",
@@ -830,9 +921,9 @@
       "sell_points": -5,
       "auto": false,
       "description": "Rate hikes, liquidity drain",
-      "icon": "🔨"
+      "icon": "🔨",
+      "activation": false
     },
-    
     {
       "id": "yellow_idle_flag",
       "name": "Yellow Idle Flag",
@@ -844,7 +935,8 @@
       "auto": true,
       "auto_trigger": "days_idle >= 5",
       "description": "5 days no action, nudge exit (can stack)",
-      "icon": "🟡"
+      "icon": "🟡",
+      "activation": true
     },
     {
       "id": "red_idle_flag",
@@ -857,7 +949,8 @@
       "auto": true,
       "auto_trigger": "days_idle >= 10",
       "description": "10 days no action, force exit (can stack)",
-      "icon": "🔴"
+      "icon": "🔴",
+      "activation": true
     }
   ]
 }

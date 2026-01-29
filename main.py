@@ -45,6 +45,8 @@ def load_trait_config():
     AUTO_TRAITS = []
     MANUAL_TRAITS = []
     for trait in TRAITS:
+        if not trait.get("activation", True):
+            continue
         auto_flag = bool(trait.get("auto", False))
         auto_trigger = trait.get("auto_trigger")
         if auto_flag and auto_trigger:
@@ -882,10 +884,10 @@ def fetch_current_price(stock_name):
         if hist.empty:
             return None
 
-        def compute_roc(close_series, periods):
+        def compute_roc(close_series, periods, current_override=None):
             if close_series is None or len(close_series) <= periods:
                 return 0.0
-            current = float(close_series.iloc[-1])
+            current = float(current_override) if current_override is not None else float(close_series.iloc[-1])
             past = float(close_series.iloc[-1 - periods])
             if past == 0:
                 return 0.0
@@ -989,8 +991,8 @@ def fetch_current_price(stock_name):
         if len(close_series) >= 2:
             prev_close = float(close_series.iloc[-2])
             roc_1d = ((float(current) - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
-        roc_3d = compute_roc(close_series, 3)
-        roc_5d = compute_roc(close_series, 5)
+        roc_3d = compute_roc(close_series, 3, current_override=current)
+        roc_5d = compute_roc(close_series, 5, current_override=current)
 
         return {
             'current': float(current),
@@ -1921,6 +1923,12 @@ def update_display(force_recommendation=False):
             4,
             f"{high_context_label}: {fmt_price(high_context)}",
         )
+    if data["buy_mode"] == "LOAD" and data.get("buy_shares", 0) > 0 and data.get("buy_price", 0) > 0:
+        unit_equiv = 0.0
+        if parsed.get("unit_size_local"):
+            unit_equiv = (data["buy_shares"] * data["buy_price"]) / parsed["unit_size_local"]
+        if unit_equiv > 0:
+            result_lines.append(f"LOAD qty: {data['buy_shares']} sh (~{unit_equiv:.2f}u)")
 
     if parsed["units_held"] > 0 and data["rescue_gear"] > 0:
         rescue_title = (
@@ -2032,6 +2040,9 @@ def update_display(force_recommendation=False):
         buy_price=data["buy_price"],
         buy_label=data["buy_label"],
         buy_drop_pct=data["buy_drop_pct"],
+        buy_units=data["buy_units"],
+        buy_shares=data["buy_shares"],
+        unit_size_local=parsed["unit_size_local"],
         rescue_trigger=data["rescue_trigger"],
         rescue_qty=data["rescue_qty"],
         rescue_drop_pct=data["rescue_drop_pct"],
@@ -2238,6 +2249,9 @@ def plot_levels(
     buy_price,
     buy_label,
     buy_drop_pct,
+    buy_units,
+    buy_shares,
+    unit_size_local,
     rescue_trigger,
     rescue_qty,
     rescue_drop_pct,
@@ -2267,7 +2281,13 @@ def plot_levels(
     if show_load and high_context and high_context > 0:
         levels.append((high_context_label, high_context, "#777777", ":", "", fmt_val(high_context), 1.4))
     if show_load and buy_price and buy_price > 0:
-        levels.append((buy_label, buy_price, "#c62828", "-", "", fmt_val(buy_price), 2.6))
+        buy_text = ""
+        if buy_shares and unit_size_local and buy_price:
+            unit_equiv = (buy_shares * buy_price) / unit_size_local
+            buy_text = f"{unit_equiv:.2f}u ~ {int(buy_shares)} sh"
+        elif buy_units:
+            buy_text = f"{buy_units:.2f}u"
+        levels.append((buy_label, buy_price, "#c62828", "-", buy_text, fmt_val(buy_price), 2.6))
     if not show_load and rescue_trigger and rescue_trigger > 0 and rescue_gear > 0:
         gear_key = int(round(rescue_gear)) if rescue_gear else 0
         color = RESCUE_GEAR_COLORS.get(gear_key, "#d32f2f")
