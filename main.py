@@ -1560,6 +1560,7 @@ def set_currency_view(is_currency):
     if is_currency:
         avg_cost_label.config(text="FX Avg Cost (₩ per $)")
         num_shares_label.config(text="USD Holdings ($)")
+        update_fx_gear_label()
         units_label.grid_remove()
         units_value_label.grid_remove()
         max_volume_label.grid_remove()
@@ -1802,52 +1803,36 @@ def update_display(force_recommendation=False):
         tier_prices = []
         tier_lines = []
         if avg_cost > 0:
-            for tier in (3.0, 5.0, 7.0):
+            tier1_pct = 1.0 + float(fx_gear_var.get() or 1.0)
+            tier2_pct = tier1_pct + 2.0
+            tier3_pct = tier1_pct + 4.0
+            tiers = [tier1_pct, tier2_pct, tier3_pct]
+            for tier in tiers:
                 price = avg_cost * (1 + tier / 100)
                 tier_prices.append(price)
-                tier_lines.append(f"Tier +{tier:.0f}%: {fmt_or_na(price, 'FX')}")
+                tier_lines.append((tier, price))
 
         fx_avg_10d = float(rec.get("fx_avg_10d", 0) or 0)
         fx_slope_10d = float(rec.get("fx_slope_10d", 0) or 0)
-        info_lines = [
-            f"FX current: {fmt_or_na(current_fx, 'FX')}",
-            f"FX avg cost: {fmt_or_na(avg_cost, 'FX')}",
-            f"USD holdings: {usd_hold:,.0f}" if usd_hold > 0 else "USD holdings: 0",
+        fx_info_lines = [
+            f"FX status: {status_label}" if avg_cost > 0 else "FX status: N/A",
         ]
-        if avg_cost > 0:
-            info_lines.append(f"FX vs avg: {fx_pnl_pct:+.2f}%")
         if fx_avg_10d > 0:
-            info_lines.append(f"FX 10d avg: {fmt_or_na(fx_avg_10d, 'FX')}")
-            info_lines.append(f"FX 10d slope: {fx_slope_10d:+.2f}%")
-        if krw_pnl != 0:
-            info_lines.append(f"KRW change: {fmt_or_na(krw_pnl, 'KR')}")
-        if value_krw > 0:
-            info_lines.append(f"KRW value: {fmt_or_na(value_krw, 'KR')}")
-        if tier_lines:
-            info_lines.extend(tier_lines)
-        if rec.get("last_update"):
-            info_lines.append(f"Last update: {rec['last_update']}")
-        fx_info_var.set("\n".join(info_lines))
+            fx_info_lines.append(f"FX 10d avg: {fmt_or_na(fx_avg_10d, 'FX')}")
+            fx_info_lines.append(f"FX 10d slope: {fx_slope_10d:+.2f}%")
+        fx_info_var.set("\n".join(fx_info_lines))
 
         result_lines = [
             f"Name: {current_name} (USD/KRW)",
             f"USD holdings: {usd_hold:,.0f}" if usd_hold > 0 else "USD holdings: 0",
-            f"FX avg cost: {fmt_or_na(avg_cost, 'FX')}",
-            f"FX current: {fmt_or_na(current_fx, 'FX')}",
+            f"KRW change: {fmt_or_na(krw_pnl, 'KR')}" if krw_pnl != 0 else "KRW change: N/A",
+            f"KRW value: {fmt_or_na(value_krw, 'KR')}" if value_krw > 0 else "KRW value: N/A",
+            f"FX vs avg: {fx_pnl_pct:+.2f}%" if avg_cost > 0 else "FX vs avg: N/A",
         ]
-        if avg_cost > 0:
-            result_lines.append(f"FX status: {status_label} ({fx_pnl_pct:+.1f}%)")
-        if avg_cost > 0:
-            result_lines.append(f"FX vs avg: {fx_pnl_pct:+.2f}%")
-        else:
-            result_lines.append("FX vs avg: N/A (set avg cost)")
-        if fx_avg_10d > 0:
-            result_lines.append(f"FX 10d avg: {fmt_or_na(fx_avg_10d, 'FX')}")
-            result_lines.append(f"FX 10d slope: {fx_slope_10d:+.2f}%")
-        if krw_pnl != 0:
-            result_lines.append(f"KRW change: {fmt_or_na(krw_pnl, 'KR')}")
-        if value_krw > 0:
-            result_lines.append(f"KRW value: {fmt_or_na(value_krw, 'KR')}")
+        if tier_lines:
+            tier_labels = ["Tier 1 (50%)", "Tier 2 (25%)", "Tier 3 (25%)"]
+            for idx, (tier, price) in enumerate(tier_lines):
+                result_lines.append(f"{tier_labels[idx]}: {fmt_or_na(price, 'FX')} (+{tier:.0f}%)")
         if rec.get("last_update"):
             result_lines.append(f"Last update: {rec['last_update']}")
         result_var.set("\n".join(result_lines))
@@ -2167,7 +2152,7 @@ def plot_currency_levels(
     if tier_prices:
         colors = ["#0a8f08", "#0066cc", "#7b1fa2"]
         for idx, price in enumerate(tier_prices):
-            label = f"Tier +{[3, 5, 7][idx]}%"
+            label = f"Tier {idx+1}"
             levels.append((label, price, colors[idx % len(colors)], "-", "", fmt_val(price), 2.4))
 
     for label, y, color, style, left_text, right_text, lw in levels:
@@ -2447,6 +2432,17 @@ def update_sell_gear_label(*args):
     update_display()
 
 
+def update_fx_gear_label(*args):
+    if "fx_gear_label" not in globals():
+        return
+    try:
+        val = float(fx_gear_var.get())
+    except (TypeError, ValueError):
+        val = 1.0
+    fx_gear_label.config(text=f"{val:.1f}")
+    update_display()
+
+
 def update_market_state():
     if is_currency_name(get_current_stock_name()):
         avg_cost_label.config(text="FX Avg Cost (₩ per $)")
@@ -2529,9 +2525,11 @@ apply_status_var = tk.StringVar()
 ratio_var = tk.StringVar()
 fx_status_var = tk.StringVar()
 fx_info_var = tk.StringVar()
+fx_gear_var = tk.DoubleVar(value=1.0)
 
 buy_gear_var.trace_add("write", lambda *_: update_buy_gear_label())
 sell_gear_var.trace_add("write", lambda *_: update_sell_gear_label())
+fx_gear_var.trace_add("write", lambda *_: update_fx_gear_label())
 
 form = ttk.Frame(main)
 form.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
@@ -2842,8 +2840,23 @@ fx_panel.grid(row=0, column=2, sticky="n", padx=(12, 0))
 fx_panel.columnconfigure(0, weight=1)
 fx_status_label = ttk.Label(fx_panel, textvariable=fx_status_var, justify="left")
 fx_status_label.grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
+fx_gear_frame = ttk.Frame(fx_panel)
+fx_gear_frame.grid(row=1, column=0, sticky="w", padx=6, pady=(0, 4))
+ttk.Label(fx_gear_frame, text="FX gear (0-5)").grid(row=0, column=0, sticky="w", padx=(0, 8))
+fx_gear_slider = ttk.Scale(
+    fx_gear_frame,
+    from_=0.0,
+    to=5.0,
+    orient="horizontal",
+    variable=fx_gear_var,
+    command=update_fx_gear_label,
+    length=160,
+)
+fx_gear_slider.grid(row=0, column=1, sticky="w")
+fx_gear_label = ttk.Label(fx_gear_frame, text="1.0")
+fx_gear_label.grid(row=0, column=2, sticky="w", padx=(6, 0))
 ttk.Label(fx_panel, textvariable=fx_info_var, justify="left").grid(
-    row=1, column=0, sticky="w", padx=6, pady=(0, 6)
+    row=2, column=0, sticky="w", padx=6, pady=(0, 6)
 )
 fx_panel.grid_remove()
 
