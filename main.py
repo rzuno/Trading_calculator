@@ -159,6 +159,7 @@ def default_record(market="KR"):
         "fx_avg": GLOBAL_FX_AVG_RATE,
         "fx_avg_10d": 0.0,
         "fx_slope_10d": 0.0,
+        "ohlc_10d": [],
         "applied_buy_gear": "",
         "applied_sell_gear": "",
         "applied_buy_points": "",
@@ -274,6 +275,7 @@ def load_data():
                 fx_avg = to_float(row.get("fx_avg", GLOBAL_FX_AVG_RATE))
                 fx_avg_10d = to_float(row.get("fx_avg_10d", 0.0))
                 fx_slope_10d = to_float(row.get("fx_slope_10d", 0.0))
+                ohlc_10d = row.get("ohlc_10d", "")
                 applied_buy_gear = to_float(row.get("applied_buy_gear", ""))
                 applied_sell_gear = to_float(row.get("applied_sell_gear", ""))
                 applied_buy_points = to_float(row.get("applied_buy_points", ""))
@@ -294,6 +296,13 @@ def load_data():
                 manual_rescue_mode = (row.get("manual_rescue_mode") or "AUTO").strip().upper()
                 if manual_rescue_mode not in ("AUTO", "DEFAULT", "HEAVY", "LIGHT"):
                     manual_rescue_mode = "AUTO"
+                if isinstance(ohlc_10d, str) and ohlc_10d:
+                    try:
+                        ohlc_10d = json.loads(ohlc_10d)
+                    except json.JSONDecodeError:
+                        ohlc_10d = []
+                if not isinstance(ohlc_10d, list):
+                    ohlc_10d = []
 
                 stock_data[name] = {
                     "avg_cost": avg_cost,
@@ -326,6 +335,7 @@ def load_data():
                     "fx_avg": fx_avg if fx_avg != "" else GLOBAL_FX_AVG_RATE,
                     "fx_avg_10d": fx_avg_10d if fx_avg_10d != "" else 0.0,
                     "fx_slope_10d": fx_slope_10d if fx_slope_10d != "" else 0.0,
+                    "ohlc_10d": ohlc_10d,
                     "applied_buy_gear": applied_buy_gear,
                     "applied_sell_gear": applied_sell_gear,
                     "applied_buy_points": applied_buy_points,
@@ -405,6 +415,7 @@ def write_data_file():
         "fx_avg",
         "fx_avg_10d",
         "fx_slope_10d",
+        "ohlc_10d",
         "applied_buy_gear",
         "applied_sell_gear",
         "applied_buy_points",
@@ -462,6 +473,7 @@ def write_data_file():
                     "fx_avg": rec.get("fx_avg", GLOBAL_FX_AVG_RATE),
                     "fx_avg_10d": rec.get("fx_avg_10d", 0.0),
                     "fx_slope_10d": rec.get("fx_slope_10d", 0.0),
+                    "ohlc_10d": json.dumps(rec.get("ohlc_10d", []), ensure_ascii=False),
                     "applied_buy_gear": rec.get("applied_buy_gear", ""),
                     "applied_sell_gear": rec.get("applied_sell_gear", ""),
                     "applied_buy_points": rec.get("applied_buy_points", ""),
@@ -876,11 +888,18 @@ def fetch_current_price(stock_name):
         return None
 
     try:
-        stock = yf.Ticker(ticker)
-
-        # Get recent history for highs and indicators
-        hist_days = HIGH_CONTEXT_DAYS + 5
-        hist = stock.history(period=f"{hist_days}d", interval="1d", prepost=True)
+        # Get recent daily history for highs and indicators
+        hist = yf.download(
+            ticker,
+            period="30d",
+            interval="1d",
+            progress=False,
+            auto_adjust=False,
+            prepost=False,
+        )
+        if hist is None or hist.empty:
+            return None
+        hist = hist.dropna(subset=["Close"])
         if hist.empty:
             return None
 
@@ -923,13 +942,14 @@ def fetch_current_price(stock_name):
                 pass
             return float(value)
 
-        hist_completed = hist.iloc[:-1] if len(hist) > 1 else hist
-        if hist_completed.empty:
-            hist_completed = hist
-        high_10d = hist["High"].tail(HIGH_CONTEXT_DAYS).max()
-        high_5d = hist_completed["High"].tail(LOAD_REF_DAYS).max()
-        atr_3d_pct = compute_atr_pct(hist, 3)
-        atr_5d_pct = compute_atr_pct(hist, 5)
+        hist_tail = hist.tail(max(HIGH_CONTEXT_DAYS, LOAD_REF_DAYS))
+        hist_10d = hist.tail(HIGH_CONTEXT_DAYS)
+        hist_5d = hist.tail(LOAD_REF_DAYS)
+
+        high_10d = hist_10d["High"].max()
+        high_5d = hist_5d["High"].max()
+        atr_3d_pct = compute_atr_pct(hist_tail, 3)
+        atr_5d_pct = compute_atr_pct(hist_tail, 5)
 
         current = None
         low_today = None
@@ -943,41 +963,15 @@ def fetch_current_price(stock_name):
             progress=False,
             auto_adjust=False,
         )
-        if not intraday.empty:
+        if intraday is not None and not intraday.empty:
             current = as_float(intraday["Close"].iloc[-1])
             low_today = as_float(intraday["Low"].min())
             high_today = as_float(intraday["High"].max())
 
         if current is None:
-            intraday_5m = yf.download(
-                ticker,
-                period="5d",
-                interval="5m",
-                prepost=True,
-                progress=False,
-                auto_adjust=False,
-            )
-            if not intraday_5m.empty:
-                current = as_float(intraday_5m["Close"].iloc[-1])
-                low_today = as_float(intraday_5m["Low"].iloc[-1])
-                high_today = as_float(intraday_5m["High"].iloc[-1])
-
-        if current is None:
-            try:
-                fast = stock.fast_info
-                if fast:
-                    current = fast.get("last_price") or fast.get("regular_market_price")
-                    low_today = fast.get("day_low")
-                    high_today = fast.get("day_high")
-            except Exception:
-                pass
-
-        if current is None:
-            current = float(hist["Close"].iloc[-1])
-
-        if low_today is None:
+            last_close = float(hist["Close"].iloc[-1])
+            current = last_close
             low_today = as_float(hist["Low"].iloc[-1])
-        if high_today is None:
             high_today = as_float(hist["High"].iloc[-1])
 
         if high_today is not None and high_today > 0:
@@ -994,6 +988,19 @@ def fetch_current_price(stock_name):
         roc_3d = compute_roc(close_series, 3, current_override=current)
         roc_5d = compute_roc(close_series, 5, current_override=current)
 
+        ohlc_10d = []
+        for idx, row in hist_10d.iterrows():
+            date_val = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)
+            ohlc_10d.append(
+                {
+                    "date": date_val,
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": float(row["Close"]),
+                }
+            )
+
         return {
             'current': float(current),
             'high_5d': high_5d,
@@ -1005,6 +1012,7 @@ def fetch_current_price(stock_name):
             'roc_5d': roc_5d,
             'atr_3d_pct': atr_3d_pct,
             'atr_5d_pct': atr_5d_pct,
+            'ohlc_10d': ohlc_10d,
             'timestamp': datetime.now()
         }
     except Exception as e:
@@ -1088,6 +1096,7 @@ def refresh_market_data():
         rec["roc_5d"] = price_data.get("roc_5d", 0.0)
         rec["atr_3d_pct"] = price_data.get("atr_3d_pct", 0.0)
         rec["atr_5d_pct"] = price_data.get("atr_5d_pct", 0.0)
+        rec["ohlc_10d"] = price_data.get("ohlc_10d", rec.get("ohlc_10d", []))
         rec["last_update"] = price_data["timestamp"].strftime("%Y-%m-%d %H:%M")
         rec["fx_rate"] = GLOBAL_FX_RATE
         rec["fx_avg"] = GLOBAL_FX_AVG_RATE
