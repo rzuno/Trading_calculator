@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+import pandas as pd
 
 try:
     import yfinance as yf
@@ -889,6 +890,48 @@ def fetch_current_price(stock_name):
 
     try:
         # Get recent daily history for highs and indicators
+        def normalize_ohlc(df, ticker_symbol):
+            if df is None or df.empty:
+                return None
+            cols = df.columns
+            def normalize_name(val):
+                return str(val).lower().replace(" ", "").replace("_", "")
+
+            def match_col(col, candidates):
+                parts = col if isinstance(col, tuple) else (col,)
+                for part in parts:
+                    if normalize_name(part) in candidates:
+                        return True
+                return False
+
+            def find_series(candidates):
+                for col in cols:
+                    if match_col(col, candidates):
+                        return df[col]
+                return None
+
+            open_candidates = {"open"}
+            high_candidates = {"high"}
+            low_candidates = {"low"}
+            close_candidates = {"close", "adjclose", "adjclose"}
+
+            open_s = find_series(open_candidates)
+            high_s = find_series(high_candidates)
+            low_s = find_series(low_candidates)
+            close_s = find_series(close_candidates)
+
+            if close_s is None:
+                return None
+
+            return pd.DataFrame(
+                {
+                    "Open": open_s if open_s is not None else close_s,
+                    "High": high_s if high_s is not None else close_s,
+                    "Low": low_s if low_s is not None else close_s,
+                    "Close": close_s,
+                }
+            )
+
         hist = yf.download(
             ticker,
             period="30d",
@@ -898,6 +941,14 @@ def fetch_current_price(stock_name):
             prepost=False,
         )
         if hist is None or hist.empty:
+            hist = yf.Ticker(ticker).history(period="30d", interval="1d", prepost=False)
+        if hist is None or hist.empty:
+            return None
+        hist_norm = normalize_ohlc(hist, ticker)
+        if hist_norm is None:
+            return None
+        hist = hist_norm
+        if "Close" not in hist.columns:
             return None
         hist = hist.dropna(subset=["Close"])
         if hist.empty:
@@ -964,9 +1015,13 @@ def fetch_current_price(stock_name):
             auto_adjust=False,
         )
         if intraday is not None and not intraday.empty:
-            current = as_float(intraday["Close"].iloc[-1])
-            low_today = as_float(intraday["Low"].min())
-            high_today = as_float(intraday["High"].max())
+            intraday_norm = normalize_ohlc(intraday, ticker)
+            if intraday_norm is not None and "Close" in intraday_norm.columns:
+                intraday = intraday_norm
+            if "Close" in intraday.columns:
+                current = as_float(intraday["Close"].iloc[-1])
+                low_today = as_float(intraday["Low"].min())
+                high_today = as_float(intraday["High"].max())
 
         if current is None:
             last_close = float(hist["Close"].iloc[-1])
@@ -1030,13 +1085,56 @@ def fetch_fx_rate():
         return None
 
     try:
+        def normalize_ohlc(df):
+            if df is None or df.empty:
+                return None
+            cols = df.columns
+            def normalize_name(val):
+                return str(val).lower().replace(" ", "").replace("_", "")
+            def match_col(col, candidates):
+                parts = col if isinstance(col, tuple) else (col,)
+                for part in parts:
+                    if normalize_name(part) in candidates:
+                        return True
+                return False
+            def find_series(candidates):
+                for col in cols:
+                    if match_col(col, candidates):
+                        return df[col]
+                return None
+            open_s = find_series({"open"})
+            high_s = find_series({"high"})
+            low_s = find_series({"low"})
+            close_s = find_series({"close", "adjclose", "adjclose"})
+            if close_s is None:
+                return None
+            return pd.DataFrame(
+                {
+                    "Open": open_s if open_s is not None else close_s,
+                    "High": high_s if high_s is not None else close_s,
+                    "Low": low_s if low_s is not None else close_s,
+                    "Close": close_s,
+                }
+            )
+
         fx = yf.Ticker("KRW=X")
         hist = fx.history(period="30d", interval="1d", prepost=True)
         if hist.empty:
             return None
+        hist_norm = normalize_ohlc(hist)
+        if hist_norm is not None:
+            hist = hist_norm
+        if "Close" not in hist.columns:
+            return None
         current = None
         intraday = fx.history(period="1d", interval="1m", prepost=True)
         if not intraday.empty:
+            intraday_norm = normalize_ohlc(intraday)
+            if intraday_norm is not None:
+                intraday = intraday_norm
+            if "Close" not in intraday.columns:
+                intraday = None
+        if intraday is not None and not intraday.empty:
             current = float(intraday["Close"].iloc[-1])
         if current is None:
             current = float(hist["Close"].iloc[-1])
@@ -1112,12 +1210,17 @@ def refresh_market_data():
             fx_rec["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M")
         stock_data[CURRENCY_NAME] = fx_rec
 
+    for rec in stock_data.values():
+        rec["fx_rate"] = GLOBAL_FX_RATE
+
     write_data_file()
     load_data()
     if current_name:
         refresh_name_list(selected=current_name)
     else:
         refresh_name_list()
+    fx_rate_var.set(format_input(GLOBAL_FX_RATE, "KR", decimals=2))
+    update_market_state()
     messagebox.showinfo("Market data", "Prices and FX updated.")
 
 
@@ -1609,6 +1712,8 @@ def on_select_stock(selected=None):
     name_choice_var.set(choice)
     set_currency_view(is_currency_name(choice))
     fill_form_from_record(choice)
+    if not is_currency_name(choice):
+        fx_rate_var.set(format_input(GLOBAL_FX_RATE, "KR", decimals=2))
     update_display()
     if not is_currency_name(choice):
         update_apply_status_display(choice)
