@@ -1,6 +1,8 @@
 ﻿import csv
 import json
 import os
+import warnings
+import logging
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import tkinter.font as tkfont
@@ -17,6 +19,8 @@ import pandas as pd
 try:
     import yfinance as yf
     YFINANCE_AVAILABLE = True
+    logging.getLogger("yfinance").setLevel(logging.ERROR)
+    warnings.filterwarnings("ignore", message=".*possibly delisted; no price data found.*")
 except ImportError:
     YFINANCE_AVAILABLE = False
     print("Warning: yfinance not installed. Price fetching disabled.")
